@@ -456,7 +456,7 @@ function applyThemeClass(name) {
 watch(
   currentTheme,
   name => {
-    theme.global.name.value = name;
+    theme.change(name);
     applyThemeClass(name);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('esp32-theme', name);
@@ -781,8 +781,6 @@ function handleBeforeUnload() {
 
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload);
-  theme.global.name.value = currentTheme.value;
-  applyThemeClass(currentTheme.value);
 });
 
 onBeforeUnmount(() => {
