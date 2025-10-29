@@ -1123,6 +1123,13 @@ async function connect() {
 
     const chipName = await loader.value.main('default_reset');
     const chip = loader.value.chip;
+    if (chip?.CHIP_NAME === 'ESP32-C6' && chip.SPI_REG_BASE === 0x60002000) {
+      chip.SPI_REG_BASE = 0x60003000;
+      appendLog(
+        'Applied ESP32-C6 SPI register base workaround (0x60002000 → 0x60003000).',
+        '[debug]'
+      );
+    }
 
     const callChip = async method => {
       const fn = chip?.[method];
@@ -1154,19 +1161,80 @@ async function connect() {
     const blockVersionMinor = await callChip('getBlkVersionMinor');
 
     const flashId = await loader.value.readFlashId().catch(() => undefined);
+    const manufacturerCode =
+      typeof flashId === 'number' && Number.isFinite(flashId) ? flashId & 0xff : null;
+    const memoryTypeCode =
+      typeof flashId === 'number' && Number.isFinite(flashId) ? (flashId >> 8) & 0xff : null;
+    const capacityCodeRaw =
+      typeof flashId === 'number' && Number.isFinite(flashId) ? (flashId >> 16) & 0xff : null;
+    appendLog(
+      `Flash detect raw: getFlashSize=${Number.isFinite(flashSizeKb) ? `${flashSizeKb} KB` : 'n/a'}, flashId=${typeof flashId === 'number' && Number.isFinite(flashId) ? `0x${flashId
+        .toString(16)
+        .padStart(6, '0')
+        .toUpperCase()}` : 'n/a'} (manuf=0x${Number.isInteger(manufacturerCode)
+        ? manufacturerCode.toString(16).toUpperCase().padStart(2, '0')
+        : '??'}, type=0x${Number.isInteger(memoryTypeCode)
+        ? memoryTypeCode.toString(16).toUpperCase().padStart(2, '0')
+        : '??'}, cap=0x${Number.isInteger(capacityCodeRaw)
+        ? capacityCodeRaw.toString(16).toUpperCase().padStart(2, '0')
+        : '??'})`,
+      '[debug]'
+    );
 
     const featureList = Array.isArray(featuresRaw)
       ? featuresRaw
       : typeof featuresRaw === 'string'
       ? featuresRaw.split(/,\s*/)
       : [];
-    const flashBytesValue = typeof flashSizeKb === 'number' ? flashSizeKb * 1024 : null;
+    let flashBytesValue = null;
+    let flashLabelSuffix = '';
+    if (typeof flashSizeKb === 'number' && flashSizeKb > 0) {
+      flashBytesValue = flashSizeKb * 1024;
+    } else {
+      const capacityCandidates = [capacityCodeRaw, memoryTypeCode, manufacturerCode].filter(
+        value =>
+          Number.isInteger(value) &&
+          value >= 0x12 &&
+          value <= 0x26
+      );
+      for (const candidate of capacityCandidates) {
+        const fallbackFlashBytes = Math.pow(2, candidate);
+        if (Number.isFinite(fallbackFlashBytes) && fallbackFlashBytes > 0) {
+          flashBytesValue = fallbackFlashBytes;
+          flashLabelSuffix = ' (via RDID)';
+          appendLog(
+            `Flash size detection fallback: using JEDEC capacity code 0x${candidate
+              .toString(16)
+              .toUpperCase()} from flash ID 0x${flashId
+              ?.toString(16)
+              .padStart(6, '0')
+              .toUpperCase()}.`,
+            '[warn]'
+          );
+          break;
+        }
+      }
+    }
+    const toHexByte = value =>
+      Number.isInteger(value) && value >= 0
+        ? value.toString(16).toUpperCase().padStart(2, '0')
+        : '??';
+    if (!flashBytesValue && typeof flashId === 'number' && !Number.isNaN(flashId)) {
+      appendLog(
+        `Flash size detection fallback unavailable. Flash ID 0x${flashId
+          .toString(16)
+          .padStart(6, '0')
+          .toUpperCase()} (manuf=0x${toHexByte(manufacturerCode)}, type=0x${toHexByte(
+          memoryTypeCode
+        )}, cap=0x${toHexByte(capacityCodeRaw)}).`,
+        '[warn]'
+      );
+    }
+
     flashSizeBytes.value = flashBytesValue;
     const flashLabel =
-      typeof flashSizeKb === 'number'
-        ? flashSizeKb >= 1024
-          ? `${(flashSizeKb / 1024).toFixed(flashSizeKb % 1024 === 0 ? 0 : 1)} MB`
-          : `${flashSizeKb} KB`
+      flashBytesValue && flashBytesValue > 0
+        ? `${formatBytes(flashBytesValue)}${flashLabelSuffix}`
         : null;
     const crystalLabel =
       typeof crystalFreq === 'number' ? `${Number(crystalFreq).toFixed(0)} MHz` : null;
