@@ -1269,7 +1269,7 @@ const connectionChipLabel = computed(() => {
   }
 
   const name = chipDetails.value?.name?.trim();
-  return name ? `Connected: ${name}` : 'Connected';
+  return name ? `${name}` : 'Connected';
 });
 
 const canFlash = computed(
