@@ -1,11 +1,8 @@
 ﻿<template>
   <v-app>
     <v-navigation-drawer
-      class="app-drawer"
-      color="surface"
       permanent
       app
-      width="260"
       elevation="1"
     >
       <v-sheet class="app-drawer__hero" color="transparent" elevation="3">
