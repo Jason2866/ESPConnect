@@ -72,8 +72,13 @@
             </v-window-item>
 
             <v-window-item value="partitions">
-              <PartitionsTab :partition-segments="partitionSegments" :formatted-partitions="formattedPartitions"
-                :unused-summary="unusedFlashSummary" />
+            <PartitionsTab :partition-segments="partitionSegments" :formatted-partitions="formattedPartitions"
+              :unused-summary="unusedFlashSummary" />
+            </v-window-item>
+
+            <v-window-item value="apps">
+              <AppsTab :apps="appPartitions" :active-slot-id="activeAppSlotId" :active-summary="appActiveSummary"
+                :loading="appMetadataLoading" :error="appMetadataError" />
             </v-window-item>
 
             <v-window-item value="flash">
@@ -183,6 +188,7 @@ import { ESPLoader, Transport } from 'esptool-js';
 import { useTheme } from 'vuetify';
 import DeviceInfoTab from './components/DeviceInfoTab.vue';
 import FlashFirmwareTab from './components/FlashFirmwareTab.vue';
+import AppsTab from './components/AppsTab.vue';
 import PartitionsTab from './components/PartitionsTab.vue';
 import SessionLogTab from './components/SessionLogTab.vue';
 import SerialMonitorTab from './components/SerialMonitorTab.vue';
@@ -266,6 +272,13 @@ const EMBEDDED_PSRAM_CAPACITY = {
     2: '4MB',
   },
 };
+
+const APP_IMAGE_HEADER_MAGIC = 0xe9;
+const APP_DESCRIPTOR_MAGIC = 0xabcd5432;
+const APP_DESCRIPTOR_LENGTH = 0x100;
+const APP_SCAN_LENGTH = 0x10000; // 64 KB
+const OTA_SELECT_ENTRY_SIZE = 32;
+const asciiDecoder = new TextDecoder('utf-8');
 
 const JEDEC_MANUFACTURERS = {
   0x01: 'Spansion / Cypress',
@@ -657,6 +670,11 @@ const flashReadOffset = ref('0x0');
 const flashReadLength = ref('');
 const flashReadStatus = ref(null);
 const flashReadStatusType = ref('info');
+const appPartitions = ref([]);
+const appMetadataLoading = ref(false);
+const appMetadataError = ref(null);
+const activeAppSlotId = ref(null);
+const appActiveSummary = ref('Active slot unknown.');
 const logBuffer = ref('');
 const monitorText = ref('');
 const monitorActive = ref(false);
@@ -686,6 +704,12 @@ const activeTab = ref('info');
 const navigationItems = computed(() => [
   { title: 'Device Info', value: 'info', icon: 'mdi-information-outline', disabled: false },
   { title: 'Partitions', value: 'partitions', icon: 'mdi-table', disabled: false },
+  {
+    title: 'Apps',
+    value: 'apps',
+    icon: 'mdi-application',
+    disabled: !connected.value,
+  },
   { title: 'Firmware Tools', value: 'flash', icon: 'mdi-chip', disabled: false },
   { title: 'Serial Monitor', value: 'console', icon: 'mdi-console-line', disabled: false },
   { title: 'Session Log', value: 'log', icon: 'mdi-clipboard-text-outline', disabled: false },
@@ -811,6 +835,262 @@ function normalizeRegisterAddressValue(value) {
     return null;
   }
   return '0x' + numeric.toString(16).toUpperCase();
+}
+
+function readUint32LE(buffer, offset) {
+  if (!buffer || offset == null || offset < 0 || offset + 4 > buffer.length) {
+    return 0;
+  }
+  return (
+    buffer[offset] |
+    (buffer[offset + 1] << 8) |
+    (buffer[offset + 2] << 16) |
+    (buffer[offset + 3] << 24)
+  ) >>> 0;
+}
+
+function decodeCString(bytes) {
+  if (!bytes || !bytes.length) {
+    return '';
+  }
+  let end = bytes.indexOf(0);
+  if (end === -1) {
+    end = bytes.length;
+  }
+  if (end <= 0) {
+    return '';
+  }
+  try {
+    return asciiDecoder.decode(bytes.subarray(0, end)).trim();
+  } catch (error) {
+    console.warn('Failed to decode string', error);
+    return '';
+  }
+}
+
+function extractAppDescriptor(buffer) {
+  if (!buffer || buffer.length < APP_DESCRIPTOR_LENGTH) {
+    return null;
+  }
+  for (let offset = 0; offset + 4 <= buffer.length; offset += 4) {
+    if (readUint32LE(buffer, offset) !== APP_DESCRIPTOR_MAGIC) {
+      continue;
+    }
+    if (offset + APP_DESCRIPTOR_LENGTH > buffer.length) {
+      continue;
+    }
+    const view = buffer.subarray(offset, offset + APP_DESCRIPTOR_LENGTH);
+    const descriptor = {
+      version: decodeCString(view.subarray(12, 12 + 32)),
+      projectName: decodeCString(view.subarray(44, 44 + 32)),
+      time: decodeCString(view.subarray(76, 76 + 16)),
+      date: decodeCString(view.subarray(92, 92 + 16)),
+      idfVersion: decodeCString(view.subarray(108, 108 + 32)),
+    };
+    return descriptor;
+  }
+  return null;
+}
+
+function detectActiveOtaSlot(otadata, otaEntries) {
+  const otaCount = otaEntries?.length ?? 0;
+  if (!otadata || !otadata.length || !otaCount) {
+    return { slotId: null, summary: 'Active slot unknown.' };
+  }
+  const entryCount = Math.min(Math.floor(otadata.length / OTA_SELECT_ENTRY_SIZE), otaCount > 1 ? 2 : 1);
+  const entries = [];
+  for (let index = 0; index < entryCount; index += 1) {
+    const base = index * OTA_SELECT_ENTRY_SIZE;
+    const seq = readUint32LE(otadata, base);
+    if (seq === 0 || seq === 0xffffffff || Number.isNaN(seq)) {
+      continue;
+    }
+    const slotIndex = (seq - 1) % otaCount;
+    if (slotIndex < 0 || slotIndex >= otaCount) {
+      continue;
+    }
+    const stateOffset = base + 16;
+    const state = stateOffset < otadata.length ? otadata[stateOffset] : null;
+    entries.push({
+      seq,
+      slotIndex,
+      state,
+    });
+  }
+  if (!entries.length) {
+    return { slotId: null, summary: 'Active slot unknown.' };
+  }
+  entries.sort((a, b) => b.seq - a.seq);
+  const winner = entries[0];
+  const slotEntry = otaEntries[winner.slotIndex];
+  if (!slotEntry) {
+    return { slotId: null, summary: 'Active slot unknown.' };
+  }
+  const slotId = `ota_${winner.slotIndex}`;
+  return {
+    slotId,
+    summary: `Active slot: ${slotId} (sequence ${winner.seq})`,
+  };
+}
+
+async function analyzeAppPartitions(loaderInstance, partitions) {
+  appPartitions.value = [];
+  activeAppSlotId.value = null;
+  appMetadataError.value = null;
+  appActiveSummary.value = 'Active slot unknown.';
+  if (!loaderInstance || !Array.isArray(partitions) || !partitions.length) {
+    return;
+  }
+
+  const appEntries = partitions
+    .filter(entry => entry && entry.type === 0x00)
+    .map(entry => ({ ...entry }))
+    .sort((a, b) => a.offset - b.offset);
+
+  if (!appEntries.length) {
+    return;
+  }
+
+  const factoryEntry = appEntries.find(entry => entry.subtype === 0x00);
+  const otaEntries = appEntries
+    .filter(entry => entry.subtype >= 0x10 && entry.subtype <= 0x1f)
+    .sort((a, b) => (a.subtype ?? 0) - (b.subtype ?? 0));
+
+  let activeSlotId = null;
+  let activeSummary = 'Active slot unknown.';
+  const otadataEntry = partitions.find(entry => entry.type === 0x01 && entry.subtype === 0x02);
+  if (otadataEntry && otaEntries.length) {
+    try {
+      const readLength = Math.min(Math.max(OTA_SELECT_ENTRY_SIZE * 2, 64), otadataEntry.size || OTA_SELECT_ENTRY_SIZE * 2);
+      const otadata = await loaderInstance.readFlash(otadataEntry.offset, readLength);
+      const detected = detectActiveOtaSlot(otadata, otaEntries);
+      if (detected.slotId) {
+        activeSlotId = detected.slotId;
+        activeSummary = detected.summary;
+      }
+    } catch (error) {
+      console.warn('Failed to read OTA data partition', error);
+      appMetadataError.value = 'Unable to read OTA metadata.';
+    }
+  }
+
+  if (!activeSlotId) {
+    if (factoryEntry) {
+      activeSlotId = 'factory';
+      activeSummary = 'Active slot: factory (fallback)';
+    } else {
+      activeSummary = 'Active slot unknown.';
+    }
+  }
+
+  const results = [];
+  for (const entry of appEntries) {
+    const slotLabel =
+      entry.subtype === 0x00
+        ? 'factory'
+        : entry.subtype >= 0x10 && entry.subtype <= 0x1f
+          ? `ota_${entry.subtype - 0x10}`
+          : `subtype_0x${entry.subtype.toString(16)}`;
+
+    const readSize = Math.min(APP_SCAN_LENGTH, entry.size || APP_SCAN_LENGTH);
+    let buffer = null;
+    let imageError = null;
+    if (readSize >= 24) {
+      try {
+        buffer = await loaderInstance.readFlash(entry.offset, readSize);
+      } catch (error) {
+        imageError = error?.message || String(error);
+        console.warn(`Failed to read app partition ${entry.label || slotLabel}`, error);
+      }
+    } else {
+      imageError = 'Partition too small to contain app image header.';
+    }
+
+    const offsetHex = `0x${entry.offset.toString(16).toUpperCase()}`;
+    const sizeText = formatBytes(entry.size) ?? `${entry.size} bytes`;
+    const displayName = entry.label?.trim() || slotLabel.toUpperCase();
+    const appInfo = {
+      key: `${slotLabel}-${entry.offset}`,
+      label: displayName,
+      slotLabel,
+      subtype: entry.subtype,
+      offset: entry.offset,
+      offsetHex,
+      size: entry.size,
+      sizeText,
+      isActive: false,
+      valid: false,
+      segmentCount: null,
+    entryAddress: null,
+    entryAddressHex: null,
+      projectName: null,
+      version: null,
+      built: null,
+      buildDate: null,
+      buildTime: null,
+      idfVersion: null,
+      descriptorFound: false,
+      error: null,
+    };
+
+    if (imageError) {
+      appInfo.error = imageError;
+      results.push(appInfo);
+      continue;
+    }
+
+    if (!buffer || buffer.length < 8) {
+      appInfo.error = 'App header truncated.';
+      results.push(appInfo);
+      continue;
+    }
+
+    if (buffer[0] !== APP_IMAGE_HEADER_MAGIC) {
+      appInfo.error = 'Encrypted or invalid image header.';
+      results.push(appInfo);
+      continue;
+    }
+
+    appInfo.valid = true;
+    appInfo.segmentCount = buffer[1];
+    appInfo.entryAddress = readUint32LE(buffer, 4);
+    appInfo.entryAddressHex =
+      appInfo.entryAddress != null
+        ? `0x${appInfo.entryAddress.toString(16).toUpperCase()}`
+        : null;
+
+    const descriptor = extractAppDescriptor(buffer);
+    if (descriptor) {
+      appInfo.descriptorFound = true;
+      appInfo.projectName = descriptor.projectName || null;
+      appInfo.version = descriptor.version || null;
+      appInfo.buildTime = descriptor.time || null;
+      appInfo.buildDate = descriptor.date || null;
+      appInfo.idfVersion = descriptor.idfVersion || null;
+      const builtParts = [];
+      if (descriptor.date) builtParts.push(descriptor.date);
+      if (descriptor.time) builtParts.push(descriptor.time);
+      appInfo.built = builtParts.join(' ').trim() || null;
+    }
+
+    results.push(appInfo);
+  }
+
+  for (const info of results) {
+    info.isActive = activeSlotId ? info.slotLabel === activeSlotId : false;
+  }
+
+  appPartitions.value = results;
+  activeAppSlotId.value = activeSlotId;
+  appActiveSummary.value = activeSummary;
+}
+
+function resetAppMetadata() {
+  appPartitions.value = [];
+  appMetadataLoading.value = false;
+  appMetadataError.value = null;
+  activeAppSlotId.value = null;
+  appActiveSummary.value = 'Active slot unknown.';
 }
 
 function applyRegisterGuide(chipKey) {
@@ -1843,6 +2123,15 @@ async function connect() {
 
     const partitions = await readPartitionTable(loader.value);
     partitionTable.value = partitions;
+    appMetadataLoading.value = true;
+    try {
+      await analyzeAppPartitions(loader.value, partitions);
+    } catch (error) {
+      console.warn('Failed to analyze app partitions', error);
+      appMetadataError.value = error?.message || String(error);
+    } finally {
+      appMetadataLoading.value = false;
+    }
 
     if (portDetails) {
       pushFact('USB Bridge', formatUsbBridge(portDetails));
@@ -2049,6 +2338,7 @@ function resetMaintenanceState() {
   downloadProgress.visible = false;
   downloadProgress.value = 0;
   downloadProgress.label = '';
+  resetAppMetadata();
 }
 
 function handleSelectRegister(address) {
