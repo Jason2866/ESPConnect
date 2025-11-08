@@ -81,7 +81,7 @@
                 :files="spiffsState.files" :status="spiffsState.status" :loading="spiffsState.loading"
                 :busy="spiffsState.busy" :saving="spiffsState.saving" :read-only="spiffsState.readOnly"
                 :read-only-reason="spiffsState.readOnlyReason" :dirty="spiffsState.dirty"
-                :backup-done="spiffsState.backupDone" :error="spiffsState.error"
+                :backup-done="spiffsState.backupDone || spiffsState.sessionBackupDone" :error="spiffsState.error"
                 :has-partition="hasSpiffsPartitionSelected" :has-client="Boolean(spiffsState.client)"
                 :usage="spiffsState.usage" :is-file-viewable="isViewableSpiffsFile"
                 @select-partition="handleSelectSpiffsPartition" @refresh="handleRefreshSpiffs"
@@ -737,6 +737,7 @@ function resetSpiffsState() {
   spiffsState.readOnlyReason = '';
   spiffsState.dirty = false;
   spiffsState.backupDone = false;
+  spiffsState.sessionBackupDone = false;
   spiffsState.diagnostics = [];
   spiffsState.baselineFiles = [];
   spiffsState.usage = {
@@ -771,6 +772,10 @@ function resolveSpiffsViewInfo(name = '') {
     return { mode: 'image', ext, mime: SPIFFS_IMAGE_MIME_MAP[ext] || 'image/*' };
   }
   return null;
+}
+
+function hasSpiffsBackup() {
+  return Boolean(spiffsState.backupDone || spiffsState.sessionBackupDone);
 }
 
 async function ensureSpiffsReady(options = {}) {
@@ -932,6 +937,7 @@ async function handleSpiffsBackup() {
       },
     });
     spiffsState.backupDone = true;
+    spiffsState.sessionBackupDone = true;
     spiffsState.status = 'Backup downloaded. You can now save changes.';
     appendLog('SPIFFS backup downloaded.', '[debug]');
   } catch (error) {
@@ -1155,8 +1161,8 @@ async function handleSpiffsSave() {
     spiffsState.status = 'No staged changes to save.';
     return;
   }
-  if (!spiffsState.backupDone) {
-    spiffsState.status = 'Download a backup before saving changes.';
+  if (!hasSpiffsBackup()) {
+    spiffsState.status = 'Download a SPIFFS backup before saving (one backup per session is enough).';
     return;
   }
   const partition = spiffsSelectedPartition.value;
@@ -1399,6 +1405,7 @@ const spiffsState = reactive({
   readOnlyReason: '',
   dirty: false,
   backupDone: false,
+  sessionBackupDone: false,
   diagnostics: [],
   baselineFiles: [],
   usage: {

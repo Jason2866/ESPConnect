@@ -93,8 +93,8 @@
           border="start"
           class="mt-2"
         >
-          Download a backup image first (use the “Backup” button). “Save to Flash” only becomes
-          available once a backup completes.
+          Download a backup image first (use the "Backup" button once per session). "Save to Flash"
+          becomes available after any successful backup made during this connection.
         </v-alert>
         <p class="text-caption text-medium-emphasis mb-0">
           Changes are staged locally until you click “Save to Flash”. A recent backup ensures you can
