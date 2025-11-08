@@ -361,7 +361,7 @@ const SPIFFS_IMAGE_MIME_MAP = {
   webp: 'image/webp',
   svg: 'image/svg+xml',
 };
-const SPIFFS_VIEWER_MAX_BYTES = 512 * 1024; // 512 KB previews
+const SPIFFS_VIEWER_MAX_BYTES = 2 * 1024 * 1024; // 2 MB previews
 const SPIFFS_VIEWER_DECODER = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
 
 const PACKAGE_LABELS = {
