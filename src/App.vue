@@ -1116,8 +1116,10 @@ async function handleSpiffsUpload({ file }) {
     const friendly = isSpaceError
       ? 'Not enough SPIFFS space for this file. Delete files or format the partition, then try again.'
       : formatErrorMessage(error);
-    spiffsState.error = friendly;
     spiffsState.status = friendly || 'SPIFFS upload failed.';
+    if (!isSpaceError) {
+      spiffsState.error = friendly;
+    }
     if (isSpaceError) {
       spiffsUploadErrorDialog.message = friendly;
       spiffsUploadErrorDialog.visible = true;
