@@ -63,7 +63,7 @@
         </div>
       </v-card-title>
       <v-card-subtitle class="monitor-card__subtitle text-medium-emphasis">
-        Console pins run at 115200 bps automatically for reliable output. Flashing uses the baud
+        Console run at 115200 bps automatically for reliable output. Flashing uses the baud
         rate selected in the toolbar.
       </v-card-subtitle>
       <v-divider />
@@ -252,6 +252,7 @@ onMounted(() => {
   white-space: pre-wrap;
   color: rgba(226, 232, 240, 0.9);
   min-height: 260px;
+  max-height: 100%;
   pointer-events: none;
 }
 
