@@ -4666,6 +4666,29 @@ function scheduleMonitorFlush() {
   }
 }
 
+function getPortIdentity(port) {
+  if (!port || typeof port.getInfo !== 'function') {
+    return null;
+  }
+  try {
+    return port.getInfo();
+  } catch (error) {
+    console.warn('Unable to read serial port info', error);
+    return null;
+  }
+}
+
+function serialPortsMatch(portA, portB) {
+  if (!portA || !portB) return false;
+  if (portA === portB) return true;
+  const infoA = getPortIdentity(portA);
+  const infoB = getPortIdentity(portB);
+  if (infoA && infoB) {
+    return infoA.usbVendorId === infoB.usbVendorId && infoA.usbProductId === infoB.usbProductId;
+  }
+  return false;
+}
+
 async function releaseTransportReader() {
   const transportInstance = transport.value;
   const reader = transportInstance?.reader;
@@ -4742,6 +4765,24 @@ function ensureTransportReader() {
     transportInstance.reader = transportInstance.device.readable.getReader();
   }
   return transportInstance.reader ?? null;
+}
+
+async function handleSerialDisconnectEvent(event) {
+  const eventPort = event?.target?.port ?? event?.port ?? null;
+  if (eventPort && currentPort.value && !serialPortsMatch(eventPort, currentPort.value)) {
+    return;
+  }
+  if (!currentPort.value && !transport.value) {
+    return;
+  }
+  appendLog('Serial device disconnected from USB. Cleaning up connection.', '[warn]');
+  if (busy.value) {
+    await disconnectTransport();
+    busy.value = false;
+    appendLog('Serial port disconnected.');
+  } else {
+    await disconnect();
+  }
 }
 
 async function monitorLoop(signal) {
@@ -5964,10 +6005,16 @@ function handleBeforeUnload() {
 
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload);
+  if ('serial' in navigator && typeof navigator.serial?.addEventListener === 'function') {
+    navigator.serial.addEventListener('disconnect', handleSerialDisconnectEvent);
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload);
+  if ('serial' in navigator && typeof navigator.serial?.removeEventListener === 'function') {
+    navigator.serial.removeEventListener('disconnect', handleSerialDisconnectEvent);
+  }
   disconnectTransport();
 });
 </script>
