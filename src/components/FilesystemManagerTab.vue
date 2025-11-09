@@ -66,7 +66,8 @@
       <v-card-text>
         <div v-if="usage?.capacityBytes" class="filesystem-usage">
           <div class="">
-            <span>Used {{ usagePercent }}% ({{ formatSize(usage.usedBytes) }} / {{ formatSize(usage.capacityBytes) }})</span>
+            <span>Used {{ usagePercent }}% ({{ formatSize(usage.usedBytes) }} / {{ formatSize(usage.capacityBytes)
+            }})</span>
             <span></span>
           </div>
           <v-progress-linear :model-value="usagePercent" height="15" rounded color="primary" />
@@ -74,27 +75,30 @@
             Free {{ formatSize(usage.freeBytes) }}
           </div>
         </div>
-        <div class="upload-row upload-row--split">
-          <div class="upload-picker">
-            <v-file-input v-model="uploadFile" density="comfortable" accept="*/*" label="Select file"
-              prepend-icon="mdi-file-upload" :disabled="readOnly || !hasClient || loading || busy || saving" />
-            <v-btn color="primary" variant="tonal" class="upload-row__cta"
-              :disabled="readOnly || !uploadFile || !hasClient || loading || busy || saving || uploadBlocked"
-              @click="submitUpload">
-              <v-icon start>mdi-upload</v-icon>
-              Upload
-            </v-btn>
-          </div>
-          <div class="filesystem-dropzone" :class="{ 'filesystem-dropzone--active': dragActive }"
-            @dragover.prevent="handleDragOver" @dragleave.prevent="handleDragLeave" @drop.prevent="handleDrop">
-            <div class="filesystem-dropzone__hint">
-              <v-icon size="32">mdi-cloud-upload-outline</v-icon>
-              <div class="filesystem-dropzone__hint-text">
-                <strong>Drop file to upload</strong>
-                <span>Auto uploads on drop</span>
+        <div>
+          <v-row>
+            <v-col>
+              <v-file-input v-model="uploadFile" density="comfortable" accept="*/*" label="Select file"
+                prepend-icon="mdi-file-upload" :disabled="readOnly || !hasClient || loading || busy || saving" />
+              <v-btn color="primary" variant="tonal"
+                :disabled="readOnly || !uploadFile || !hasClient || loading || busy || saving || uploadBlocked"
+                @click="submitUpload">
+                <v-icon start>mdi-upload</v-icon>
+                Upload
+              </v-btn>
+            </v-col>
+            <v-col>
+              <div class="filesystem-dropzone" :class="{ 'filesystem-dropzone--active': dragActive }"
+                @dragover.prevent="handleDragOver" @dragleave.prevent="handleDragLeave" @drop.prevent="handleDrop">
+                <div class="filesystem-dropzone__hint">
+                  <v-icon size="32">mdi-cloud-upload-outline</v-icon>
+                  <div class="filesystem-dropzone__hint-text">
+                    <strong>Drop files to add</strong>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            </v-col>
+          </v-row>
         </div>
 
         <v-alert v-if="!files.length" type="info" variant="tonal" density="comfortable" border="start" class="mt-4">
