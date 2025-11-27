@@ -560,7 +560,7 @@ const SUPPORTED_VENDORS = [
 ];
 
 const DEFAULT_ROM_BAUD = 115200;
-const DEFAULT_FLASH_BAUD = 921600;
+const DEFAULT_FLASH_BAUD = 2000000;
 const MONITOR_BAUD = 115200;
 const DEBUG_SERIAL = false;
 const SPIFFS_TEXT_EXTENSIONS = [
@@ -3171,7 +3171,7 @@ const flashProgress = ref(0);
 const flashProgressDialog = reactive({ visible: false, value: 0, label: '' });
 const flashCancelRequested = ref(false);
 const selectedBaud = ref(String(DEFAULT_FLASH_BAUD));
-const baudrateOptions = ['115200', '230400', '460800', '921600'];
+const baudrateOptions = ['115200', '230400', '460800', '921600', '1500000', '2000000'];
 const flashOffset = ref('0x0');
 const eraseFlash = ref(false);
 const selectedPreset = ref(null);
