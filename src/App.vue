@@ -3864,6 +3864,8 @@ const RESERVED_SEGMENTS = [
   },
 ];
 
+const MIN_SEGMENT_PERCENT = 1; // ensure tiny partitions remain hoverable in the map
+
 const partitionSegments = computed(() => {
   if (!connected.value) {
     return [];
@@ -3962,9 +3964,17 @@ const partitionSegments = computed(() => {
   const totalSpan = sizedSegments.reduce((sum, segment) => sum + segment.size, 0) || 1;
   let partitionIndex = 0;
 
-  return sizedSegments.map(segment => {
+  const adjustedPercents = sizedSegments.map(segment => {
     const widthPercent = (segment.size / totalSpan) * 100;
-    const widthValue = Number.isFinite(widthPercent) ? Math.max(widthPercent, 0) : 0;
+    return Number.isFinite(widthPercent)
+      ? Math.max(widthPercent, MIN_SEGMENT_PERCENT)
+      : MIN_SEGMENT_PERCENT;
+  });
+  const totalAdjusted = adjustedPercents.reduce((sum, value) => sum + value, 0) || 1;
+  const normalizationFactor = 100 / totalAdjusted;
+
+  return sizedSegments.map((segment, idx) => {
+    const widthValue = adjustedPercents[idx] * normalizationFactor;
     const width = `${widthValue.toFixed(4)}%`;
     const offsetHex = `0x${segment.offset.toString(16).toUpperCase()}`;
     const sizeText = formatBytes(segment.size) ?? `${segment.size} bytes`;

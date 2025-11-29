@@ -221,6 +221,7 @@ const partitionCardTitle = computed(() => {
 .partition-segment {
   position: relative;
   padding: 10px 12px;
+  min-width: 10px;
   display: flex;
   flex-direction: column;
   justify-content: center;
