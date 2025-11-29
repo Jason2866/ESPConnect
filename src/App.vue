@@ -4778,6 +4778,7 @@ async function connect() {
       flashBytesValue && flashBytesValue > 0
         ? `${formatBytes(flashBytesValue)}${flashLabelSuffix}`
         : 'Flash size not detected';
+        
     const crystalLabel =
       typeof crystalFreq === 'number' ? `${Number(crystalFreq).toFixed(0)} MHz` : null;
     const macLabel = macAddress || 'Unavailable';
