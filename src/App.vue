@@ -5132,6 +5132,8 @@ async function connect() {
     const connectBaud = DEFAULT_ROM_BAUD;
     lastFlashBaud.value = desiredBaud;
     const portDetails = currentPort.value?.getInfo ? currentPort.value.getInfo() : null;
+    const usbBridge = portDetails ? formatUsbBridge(portDetails) : "Unknown";
+
     const esptool = createEsptoolClient({
       port: currentPort.value,
       terminal,
@@ -5357,8 +5359,8 @@ async function connect() {
       appMetadataLoaded.value = false;
     }
 
-    if (portDetails) {
-      pushFact('USB Bridge', formatUsbBridge(portDetails));
+    if (usbBridge) {
+      pushFact('USB Bridge', usbBridge);
     }
 
     pushFact('Connection Baud', `${currentBaud.value.toLocaleString()} bps`);
