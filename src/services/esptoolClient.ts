@@ -63,6 +63,7 @@ export interface ConnectHandshakeResult {
   chipName: string;
   macAddress?: string;
   securityFacts: SecurityFact[];
+  flashSize :string | null;
 }
 
 export interface EsptoolClient {
@@ -73,7 +74,6 @@ export interface EsptoolClient {
   changeBaud: (baud: number) => Promise<void>;
   readPartitionTable: (offset?: number, length?: number) => Promise<any[]>;
   readFlashId: () => Promise<number | undefined>;
-  detectFlashSize: () => Promise<string | undefined>;
   readChipMetadata: () => Promise<{
     description: string | undefined;
     features: any;
@@ -448,7 +448,7 @@ export function createEsptoolClient({
         logger.error('Cannot read secutiry information');
       }
 
-      const result: ConnectHandshakeResult = { chipName, macAddress, securityFacts };
+      const result: ConnectHandshakeResult = { chipName, macAddress, securityFacts,flashSize:loader.flashSize };
       return result;
     } finally {
       setBusy(false);
@@ -495,18 +495,6 @@ export function createEsptoolClient({
     setBusy(true);
     try {
       return await loader.flashId();
-    } catch {
-      return undefined;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function detectFlashSize(): Promise<string | undefined> {
-    setBusy(true);
-    try {
-      await loader.detectFlashSize();
-      return loader.flashSize ?? undefined;
     } catch {
       return undefined;
     } finally {
@@ -608,7 +596,6 @@ export function createEsptoolClient({
     changeBaud,
     readPartitionTable,
     readFlashId,
-    detectFlashSize,
     readChipMetadata,
   };
 

@@ -5227,9 +5227,9 @@ async function connect() {
     const crystalFreq = metadata.crystalFreq;
 
     connectDialog.message = `Reading Flash size...`;
-    const flashLabel = await esptool.detectFlashSize();
+    const flashLabel = esp.flashSize;
     appendLog(
-      `Chip detectFlashSize: ${flashLabel === undefined ? 'undefined' : JSON.stringify(flashLabel)}`,
+      `Chip detectFlashSize: ${flashLabel === null ? 'undefined' : flashLabel}`,
       '[ESPConnect-Debug]'
     );
 
