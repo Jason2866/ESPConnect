@@ -144,13 +144,13 @@ jobs:
             
             **macOS Apple Silicon:**
             ```bash
-            curl -L -O "https://github.com/Jason2866/ESPConnect/releases/download/${{ github.ref_name }}/ESPConnect-arm64.dmg"
+            curl -L -O "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ESPConnect-arm64.dmg"
             ```
             Open the DMG and drag ESPConnect to Applications. First launch: Right-click → Open (to bypass Gatekeeper).
             
             **macOS Intel:**
             ```bash
-            curl -L -O "https://github.com/Jason2866/ESPConnect/releases/download/${{ github.ref_name }}/ESPConnect-x64.dmg"
+            curl -L -O "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ESPConnect-x64.dmg"
             ```
             Open the DMG and drag ESPConnect to Applications. First launch: Right-click → Open (to bypass Gatekeeper).
             
