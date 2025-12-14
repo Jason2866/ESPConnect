@@ -93,8 +93,8 @@ module.exports = {
       name: '@electron-forge/publisher-github',
       config: {
         repository: {
-          owner: process.env.GITHUB_REPOSITORY_OWNER || 'Jason2866',
-          name: (process.env.GITHUB_REPOSITORY || 'Jason2866/ESPConnect').split('/')[1]
+          owner: process.env.GITHUB_REPOSITORY_OWNER || 'thelastoutpostworkshop',
+          name: (process.env.GITHUB_REPOSITORY || 'thelastoutpostworkshop/ESPConnect').split('/')[1]
         },
         prerelease: false,
         draft: true
