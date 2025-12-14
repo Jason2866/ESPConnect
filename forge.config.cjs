@@ -66,10 +66,10 @@ module.exports = {
     },
     {
       name: '@electron-forge/maker-dmg',
-      config: {
+      config: (arch) => ({
         format: 'ULFO',
-        name: '${name}-${arch}',
-      },
+        name: `ESPConnect-${arch}`,
+      }),
     },
   ],
   plugins: [
