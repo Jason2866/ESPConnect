@@ -55,21 +55,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build TypeScript and Rollup
-        run: npm run prepublishOnly
+      - name: Build Vite application
+        run: npm run build
 
       - name: Build Electron app
         run: npm run make -- --arch=${{ matrix.arch }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # macOS: Upload only DMG
-      - name: Upload macOS DMG
+      # macOS: Upload DMG and ZIP
+      - name: Upload macOS artifacts
         if: matrix.platform == 'darwin'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: out/make/*.dmg
+          path: |
+            out/make/**/*.dmg
+            out/make/zip/**/*.zip
           retention-days: 5
 
       # Windows: Upload Squirrel installer and ZIP
@@ -79,20 +81,21 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: |
-            out/make/squirrel.windows/**/*.exe
-            out/make/zip/**/*.zip
+            out/make/squirrel.windows/x64/*.exe
+            out/make/squirrel.windows/x64/*.nupkg
+            out/make/zip/win32/x64/*.zip
           retention-days: 5
 
-      # Linux: Upload DEB and RPM
+      # Linux: Upload DEB, RPM and ZIP
       - name: Upload Linux artifacts
         if: matrix.platform == 'linux'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: |
-            out/make/deb/**/*.deb
-            out/make/rpm/**/*.rpm
-            out/make/zip/**/*.zip
+            out/make/deb/x64/*.deb
+            out/make/rpm/x64/*.rpm
+            out/make/zip/linux/x64/*.zip
           retention-days: 5
 
   release:
@@ -116,28 +119,61 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: WebSerial ESPTool ${{ github.ref_name }}
+          name: ESPConnect ${{ github.ref_name }}
           body: |
-            ## WebSerial ESPTool ${{ github.ref_name }}
+            ## ESPConnect ${{ github.ref_name }}
             
-            ### Downloads
+            Browser-based control center for ESP32 and ESP8266 boards - now as a standalone desktop application!
             
-            | Platform | Architecture | File |
-            |----------|--------------|------|
-            | macOS | Apple Silicon | `*.arm64.dmg` |
-            | macOS | Intel | `*.x64.dmg` |
-            | Windows | x64 | `*.exe` / `*.zip` |
-            | Linux | x64 | `*.deb` / `*.rpm` / `*.zip` |
+            ### 🎯 Features
+            - ✅ Works completely **offline** - no internet connection required
+            - ✅ Native Web Serial API support for all platforms
+            - ✅ Flash firmware, manage SPIFFS/LittleFS, backup flash memory
+            - ✅ Device info, partitions viewer, serial monitor
             
-            ### Installation
+            ### 📥 Downloads
             
-            **macOS Apple Silicon:** Download with `curl -L -O "https://github.com/Jason2866/WebSerial_ESPTool/releases/download/${{ github.ref_name }}/WebSerial.ESPTool-${{ steps.version.outputs.VERSION }}-arm64.dmg"` to avoid Gatekeeper flags the package. Open the DMG and drag the app to Applications.
+            | Platform | Architecture | File Type | Notes |
+            |----------|--------------|-----------|-------|
+            | macOS | Apple Silicon (M1/M2/M3) | `.dmg` | macOS 11+ |
+            | macOS | Intel | `.dmg` | macOS 10.13+ |
+            | Windows | x64 | `.exe` installer | Windows 10+ |
+            | Linux | x64 | `.deb` / `.rpm` | Ubuntu, Debian, Fedora, etc. |
             
-            **macOS Intel:** Download with `curl -L -O "https://github.com/Jason2866/WebSerial_ESPTool/releases/download/${{ github.ref_name }}/WebSerial.ESPTool-${{ steps.version.outputs.VERSION }}-x64.dmg"` to avoid Gatekeeper flags the package. Open the DMG and drag the app to Applications.
+            ### 📝 Installation
             
-            **Windows:** Run the `.exe` installer or extract the `.zip` archive.
+            **macOS Apple Silicon:**
+            ```bash
+            curl -L -O "https://github.com/Jason2866/ESPConnect/releases/download/${{ github.ref_name }}/ESPConnect-${{ steps.version.outputs.VERSION }}-arm64.dmg"
+            ```
+            Open the DMG and drag ESPConnect to Applications. First launch: Right-click → Open (to bypass Gatekeeper).
             
-            **Linux:** Install via `sudo dpkg -i *.deb` or `sudo rpm -i *.rpm`, or extract the `.zip` archive.
+            **macOS Intel:**
+            ```bash
+            curl -L -O "https://github.com/Jason2866/ESPConnect/releases/download/${{ github.ref_name }}/ESPConnect-${{ steps.version.outputs.VERSION }}-x64.dmg"
+            ```
+            Open the DMG and drag ESPConnect to Applications. First launch: Right-click → Open (to bypass Gatekeeper).
+            
+            **Windows:**
+            Download and run the `.exe` installer. Windows Defender may show a warning on first launch - click "More info" → "Run anyway".
+            
+            **Linux (Debian/Ubuntu):**
+            ```bash
+            sudo dpkg -i espconnect_${{ steps.version.outputs.VERSION }}_amd64.deb
+            ```
+            
+            **Linux (Fedora/RHEL):**
+            ```bash
+            sudo rpm -i espconnect-${{ steps.version.outputs.VERSION }}.x86_64.rpm
+            ```
+            
+            ### 🔌 USB Serial Permissions (Linux)
+            
+            Add your user to the `dialout` group:
+            ```bash
+            sudo usermod -a -G dialout $USER
+            ```
+            Then log out and back in.
           draft: false
           prerelease: false
           files: |
