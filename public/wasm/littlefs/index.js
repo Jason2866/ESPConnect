@@ -3,6 +3,11 @@
  * 
  * Provides TypeScript-first API for LittleFS with disk version control.
  * Supports DISK_VERSION_2_0 to prevent automatic migration of older filesystems.
+ * 
+ * ESP-IDF Compatible Configuration:
+ * - LFS_NAME_MAX=64 (filename length)
+ * - LFS_ATTR_MAX=4 (metadata for timestamps)
+ * - LFS_MULTIVERSION enabled
  */
 
 const DEFAULT_BLOCK_SIZE = 4096;
@@ -10,6 +15,11 @@ const DEFAULT_BLOCK_COUNT = 256;
 const DEFAULT_LOOKAHEAD_SIZE = 32;
 const INITIAL_LIST_BUFFER = 4096;
 const LFS_ERR_NOSPC = -28;
+
+/**
+ * Maximum filename length (ESP-IDF default)
+ */
+export const LFS_NAME_MAX = 64;
 
 /**
  * LittleFS disk version 2.0 (0x00020000)

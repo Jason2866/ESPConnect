@@ -1,6 +1,11 @@
 import type { FileSource, BinarySource } from "../shared/types";
 
 /**
+ * Maximum filename length (ESP-IDF default: 64)
+ */
+export declare const LFS_NAME_MAX: number;
+
+/**
  * LittleFS disk version 2.0 (0x00020000)
  * Use this for maximum compatibility with older implementations.
  */
