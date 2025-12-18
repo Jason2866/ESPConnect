@@ -1,8 +1,37 @@
-const DEFAULT_BLOCK_SIZE = 512;
-const DEFAULT_BLOCK_COUNT = 512;
+/**
+ * LittleFS WebAssembly Bindings for ESPConnect
+ * 
+ * Provides TypeScript-first API for LittleFS with disk version control.
+ * Supports DISK_VERSION_2_0 to prevent automatic migration of older filesystems.
+ */
+
+const DEFAULT_BLOCK_SIZE = 4096;
+const DEFAULT_BLOCK_COUNT = 256;
 const DEFAULT_LOOKAHEAD_SIZE = 32;
 const INITIAL_LIST_BUFFER = 4096;
 const LFS_ERR_NOSPC = -28;
+
+/**
+ * LittleFS disk version 2.0 (0x00020000)
+ * Use this for maximum compatibility with older implementations.
+ */
+export const DISK_VERSION_2_0 = 0x00020000;
+
+/**
+ * LittleFS disk version 2.1 (0x00020001)
+ * Latest version with additional features.
+ */
+export const DISK_VERSION_2_1 = 0x00020001;
+
+/**
+ * Format disk version as human-readable string (e.g., "2.0", "2.1")
+ */
+export function formatDiskVersion(version) {
+    const major = (version >> 16) & 0xffff;
+    const minor = version & 0xffff;
+    return `${major}.${minor}`;
+}
+
 export class LittleFSError extends Error {
     constructor(message, code) {
         super(message);
@@ -10,13 +39,28 @@ export class LittleFSError extends Error {
         this.name = "LittleFSError";
     }
 }
+
+/**
+ * Create a new LittleFS instance
+ * @param {LittleFSOptions} options 
+ * @returns {Promise<LittleFS>}
+ */
 export async function createLittleFS(options = {}) {
     console.info("[littlefs-wasm] createLittleFS() starting", options);
     const wasmURL = options.wasmURL ?? new URL("./littlefs.wasm", import.meta.url);
     const exports = await instantiateLittleFSModule(wasmURL);
+    
     const blockSize = options.blockSize ?? DEFAULT_BLOCK_SIZE;
     const blockCount = options.blockCount ?? DEFAULT_BLOCK_COUNT;
     const lookaheadSize = options.lookaheadSize ?? DEFAULT_LOOKAHEAD_SIZE;
+    
+    // Set disk version BEFORE init if specified
+    // This prevents automatic migration of older filesystems
+    if (options.diskVersion !== undefined && typeof exports.lfsjs_set_disk_version === 'function') {
+        console.info("[littlefs-wasm] Setting disk version to", formatDiskVersion(options.diskVersion));
+        exports.lfsjs_set_disk_version(options.diskVersion);
+    }
+    
     console.info("[littlefs-wasm] Calling lfsjs_init with", {
         blockSize,
         blockCount,
@@ -27,6 +71,7 @@ export async function createLittleFS(options = {}) {
     if (initResult < 0) {
         throw new LittleFSError("Failed to initialize LittleFS", initResult);
     }
+    
     if (options.formatOnInit) {
         console.info("[littlefs-wasm] Calling lfsjs_format()");
         const formatResult = exports.lfsjs_format();
@@ -35,46 +80,73 @@ export async function createLittleFS(options = {}) {
             throw new LittleFSError("Failed to format filesystem", formatResult);
         }
     }
+    
     console.info("[littlefs-wasm] Filesystem initialized");
     const client = new LittleFSClient(exports);
     client.refreshStorageSize();
     return client;
 }
+
+/**
+ * Create LittleFS from an existing image
+ * @param {Uint8Array|ArrayBuffer} image 
+ * @param {LittleFSOptions} options 
+ * @returns {Promise<LittleFS>}
+ */
 export async function createLittleFSFromImage(image, options = {}) {
     console.info("[littlefs-wasm] createLittleFSFromImage() starting");
     const wasmURL = options.wasmURL ?? new URL("./littlefs.wasm", import.meta.url);
     const exports = await instantiateLittleFSModule(wasmURL);
+    
     const bytes = asBinaryUint8Array(image);
     const blockSize = options.blockSize ?? DEFAULT_BLOCK_SIZE;
     if (blockSize === 0) {
         throw new Error("blockSize must be a positive integer");
     }
+    
     const inferredBlockCount = bytes.length / blockSize;
     const blockCount = options.blockCount ?? inferredBlockCount;
     if (blockCount * blockSize !== bytes.length) {
         throw new Error("Image size must equal blockSize * blockCount");
     }
+    
     const lookaheadSize = options.lookaheadSize ?? DEFAULT_LOOKAHEAD_SIZE;
+    
+    // For existing images, we DON'T set disk version
+    // This preserves the original version from the image
+    // and prevents unwanted migration
+    
     const heap = new Uint8Array(exports.memory.buffer);
     const imagePtr = exports.malloc(bytes.length || 1);
     if (!imagePtr) {
         throw new LittleFSError("Failed to allocate WebAssembly memory", LFS_ERR_NOSPC);
     }
+    
     try {
         heap.set(bytes, imagePtr);
         const initResult = exports.lfsjs_init_from_image(blockSize, blockCount, lookaheadSize, imagePtr, bytes.length);
         if (initResult < 0) {
             throw new LittleFSError("Failed to initialize LittleFS from image", initResult);
         }
-    }
-    finally {
+    } finally {
         exports.free(imagePtr);
     }
+    
     const client = new LittleFSClient(exports);
     client.refreshStorageSize();
+    
+    // Log the disk version of the loaded image
+    try {
+        const version = client.getDiskVersion();
+        console.info("[littlefs-wasm] Loaded image with disk version", formatDiskVersion(version));
+    } catch (e) {
+        console.warn("[littlefs-wasm] Could not read disk version:", e);
+    }
+    
     console.info("[littlefs-wasm] Filesystem initialized from image");
     return client;
 }
+
 class LittleFSClient {
     constructor(exports) {
         this.encoder = new TextEncoder();
@@ -85,10 +157,12 @@ class LittleFSClient {
         this.heapU8 = new Uint8Array(this.exports.memory.buffer);
         this.refreshStorageSize();
     }
+
     format() {
         const result = this.exports.lfsjs_format();
         this.assertOk(result, "format filesystem");
     }
+
     list(path = "/") {
         const normalizedPath = normalizePathOptional(path);
         const pathPtr = this.allocString(normalizedPath);
@@ -108,15 +182,16 @@ class LittleFSClient {
                 }
                 const payload = this.decoder.decode(this.heapU8.subarray(ptr, ptr + used));
                 return parseListPayload(payload);
-            }
-            finally {
+            } finally {
                 this.exports.free(ptr);
             }
         }
     }
+
     addFile(path, data) {
         this.writeFile(path, data);
     }
+
     writeFile(path, data) {
         const normalizedPath = normalizePath(path);
         const payload = asUint8Array(data, this.encoder);
@@ -126,12 +201,12 @@ class LittleFSClient {
             this.heapU8.set(payload, dataPtr);
             const result = this.exports.lfsjs_add_file(pathPtr, dataPtr, payload.length);
             this.assertOk(result, `add file at "${normalizedPath}"`);
-        }
-        finally {
+        } finally {
             this.exports.free(dataPtr);
             this.exports.free(pathPtr);
         }
     }
+
     delete(path, options) {
         const recursive = options?.recursive === true;
         const normalizedPath = normalizePath(path);
@@ -139,25 +214,26 @@ class LittleFSClient {
         try {
             const result = this.exports.lfsjs_remove(pathPtr, recursive ? 1 : 0);
             this.assertOk(result, `delete "${normalizedPath}"${recursive ? " (recursive)" : ""}`);
-        }
-        finally {
+        } finally {
             this.exports.free(pathPtr);
         }
     }
+
     deleteFile(path) {
         this.delete(path);
     }
+
     mkdir(path) {
         const normalizedPath = normalizePath(path);
         const pathPtr = this.allocString(normalizedPath);
         try {
             const result = this.exports.lfsjs_mkdir(pathPtr);
             this.assertOk(result, `mkdir "${normalizedPath}"`);
-        }
-        finally {
+        } finally {
             this.exports.free(pathPtr);
         }
     }
+
     rename(oldPath, newPath) {
         const from = normalizePath(oldPath);
         const to = normalizePath(newPath);
@@ -166,12 +242,12 @@ class LittleFSClient {
         try {
             const result = this.exports.lfsjs_rename(fromPtr, toPtr);
             this.assertOk(result, `rename "${from}" -> "${to}"`);
-        }
-        finally {
+        } finally {
             this.exports.free(fromPtr);
             this.exports.free(toPtr);
         }
     }
+
     toImage() {
         const size = this.ensureStorageSize();
         if (size === 0) {
@@ -182,11 +258,11 @@ class LittleFSClient {
             const copied = this.exports.lfsjs_export_image(ptr, size);
             this.assertOk(copied, "export filesystem image");
             return this.heapU8.slice(ptr, ptr + size);
-        }
-        finally {
+        } finally {
             this.exports.free(ptr);
         }
     }
+
     readFile(path) {
         const normalizedPath = normalizePath(path);
         const pathPtr = this.allocString(normalizedPath);
@@ -201,32 +277,78 @@ class LittleFSClient {
                 const read = this.exports.lfsjs_read_file(pathPtr, dataPtr, size);
                 this.assertOk(read, `read file "${normalizedPath}"`);
                 return this.heapU8.slice(dataPtr, dataPtr + size);
-            }
-            finally {
+            } finally {
                 this.exports.free(dataPtr);
             }
-        }
-        finally {
+        } finally {
             this.exports.free(pathPtr);
         }
     }
+
+    /**
+     * Get the disk version of the mounted filesystem.
+     * @returns {number} Version as 32-bit number (e.g., 0x00020000 for v2.0)
+     */
+    getDiskVersion() {
+        if (typeof this.exports.lfsjs_get_disk_version === 'function') {
+            const version = this.exports.lfsjs_get_disk_version();
+            this.assertOk(version, "get disk version");
+            return version;
+        }
+        // Fallback for older WASM builds
+        console.warn("[littlefs-wasm] getDiskVersion not available in WASM module");
+        return DISK_VERSION_2_0;
+    }
+
+    /**
+     * Get filesystem usage statistics
+     * @returns {{ capacityBytes: number, usedBytes: number, freeBytes: number }}
+     */
+    getUsage() {
+        const size = this.ensureStorageSize();
+        // Try to get actual usage from WASM if available
+        if (typeof this.exports.lfsjs_fs_usage === 'function') {
+            const usedBlocks = this.exports.lfsjs_fs_usage();
+            if (usedBlocks >= 0) {
+                const blockSize = this.exports.lfsjs_block_size?.() ?? DEFAULT_BLOCK_SIZE;
+                const usedBytes = usedBlocks * blockSize;
+                return {
+                    capacityBytes: size,
+                    usedBytes: usedBytes,
+                    freeBytes: size - usedBytes,
+                };
+            }
+        }
+        // Fallback: estimate from file sizes
+        const files = this.list("/");
+        const usedBytes = files.reduce((sum, f) => sum + (f.size || 0), 0);
+        return {
+            capacityBytes: size,
+            usedBytes: usedBytes,
+            freeBytes: size - usedBytes,
+        };
+    }
+
     refreshHeap() {
         if (this.heapU8.buffer !== this.exports.memory.buffer) {
             this.heapU8 = new Uint8Array(this.exports.memory.buffer);
         }
     }
+
     refreshStorageSize() {
         const size = this.exports.lfsjs_storage_size();
         if (size > 0) {
             this.storageSize = size;
         }
     }
+
     ensureStorageSize() {
         if (this.storageSize === 0) {
             this.refreshStorageSize();
         }
         return this.storageSize;
     }
+
     alloc(size) {
         if (size <= 0) {
             return 0;
@@ -238,6 +360,7 @@ class LittleFSClient {
         this.refreshHeap();
         return ptr;
     }
+
     allocString(value) {
         const encoded = this.encoder.encode(value);
         const ptr = this.alloc(encoded.length + 1);
@@ -245,12 +368,14 @@ class LittleFSClient {
         this.heapU8[ptr + encoded.length] = 0;
         return ptr;
     }
+
     assertOk(code, action) {
         if (code < 0) {
             throw new LittleFSError(`Unable to ${action}`, code);
         }
     }
 }
+
 async function instantiateLittleFSModule(input) {
     const source = resolveWasmURL(input);
     console.info("[littlefs-wasm] Fetching wasm from", source.href);
@@ -268,8 +393,7 @@ async function instantiateLittleFSModule(input) {
             wasmContext.memory = getExportedMemory(streaming.instance.exports);
             console.info("[littlefs-wasm] instantiateStreaming succeeded");
             return streaming.instance.exports;
-        }
-        catch (error) {
+        } catch (error) {
             console.warn("Unable to instantiate LittleFS wasm via streaming, retrying with arrayBuffer()", error);
             response = await fetch(source);
             if (!response.ok) {
@@ -285,6 +409,7 @@ async function instantiateLittleFSModule(input) {
     console.info("[littlefs-wasm] instantiate(bytes) succeeded");
     return instance.instance.exports;
 }
+
 function parseListPayload(payload) {
     if (!payload) {
         return [];
@@ -293,14 +418,15 @@ function parseListPayload(payload) {
         .split("\n")
         .filter((line) => line.length > 0)
         .map((line) => {
-        const [rawPath, rawSize, rawType] = line.split("\t");
-        return {
-            path: rawPath ?? "",
-            size: Number(rawSize ?? "0") || 0,
-            type: rawType === "d" ? "dir" : "file"
-        };
-    });
+            const [rawPath, rawSize, rawType] = line.split("\t");
+            return {
+                path: rawPath ?? "",
+                size: Number(rawSize ?? "0") || 0,
+                type: rawType === "d" ? "dir" : "file"
+            };
+        });
 }
+
 function normalizePath(input) {
     const value = input.trim().replace(/\\/g, "/");
     const withoutRoot = value.replace(/^\/+/, "");
@@ -315,6 +441,7 @@ function normalizePath(input) {
     const clean = parts.join("/");
     return clean;
 }
+
 function normalizePathOptional(input) {
     const trimmed = input.trim();
     if (trimmed === "" || trimmed === "/") {
@@ -322,6 +449,7 @@ function normalizePathOptional(input) {
     }
     return `/${normalizePath(trimmed)}`;
 }
+
 function asUint8Array(source, encoder) {
     if (typeof source === "string") {
         return encoder.encode(source);
@@ -334,6 +462,7 @@ function asUint8Array(source, encoder) {
     }
     throw new Error("Unsupported file payload type");
 }
+
 function asBinaryUint8Array(source) {
     if (source instanceof Uint8Array) {
         return source;
@@ -343,6 +472,7 @@ function asBinaryUint8Array(source) {
     }
     throw new Error("Expected Uint8Array or ArrayBuffer for filesystem image");
 }
+
 function resolveWasmURL(input) {
     if (input instanceof URL) {
         return input;
@@ -353,11 +483,11 @@ function resolveWasmURL(input) {
     const baseHref = locationLike?.href;
     try {
         return baseHref ? new URL(input, baseHref) : new URL(input);
-    }
-    catch (error) {
+    } catch (error) {
         throw new Error(`Unable to resolve wasm URL from "${input}": ${String(error)}`);
     }
 }
+
 function createDefaultImports(context) {
     const noop = () => { };
     const ok = () => 0;
@@ -372,6 +502,7 @@ function createDefaultImports(context) {
         }
     };
 }
+
 function handleFdWrite(context, fd, iov, iovcnt, pnum) {
     const memory = context.memory;
     if (!memory) {
@@ -393,6 +524,7 @@ function handleFdWrite(context, fd, iov, iovcnt, pnum) {
     view.setUint32(pnum, total, true);
     return 0;
 }
+
 function getExportedMemory(exports) {
     for (const value of Object.values(exports)) {
         if (value instanceof WebAssembly.Memory) {

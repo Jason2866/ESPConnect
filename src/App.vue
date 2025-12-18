@@ -120,6 +120,7 @@
                 :dirty="littlefsState.dirty" :backup-done="littlefsState.backupDone || littlefsState.sessionBackupDone"
                 :error="littlefsState.error" :has-partition="hasLittlefsPartitionSelected"
                 :has-client="Boolean(littlefsState.client)" :usage="littlefsState.usage"
+                :disk-version="littlefsState.diskVersion"
                 :upload-blocked="littlefsState.uploadBlocked" :upload-blocked-reason="littlefsState.uploadBlockedReason"
                 fs-label="LittleFS" :load-cancelled="littlefsState.loadCancelled" partition-title="LittleFS Partition"
                 empty-state-message="No LittleFS files found. Read the partition or upload to begin."
@@ -2456,6 +2457,10 @@ function updateLittlefsUsage(partition = littlefsSelectedPartition.value) {
     usedBytes,
     freeBytes: Math.max(capacityBytes - usedBytes, 0),
   };
+  // Update disk version from client if available
+  if (littlefsState.client?.getDiskVersion) {
+    littlefsState.diskVersion = littlefsState.client.getDiskVersion();
+  }
 }
 
 // Reset FATFS state to initial defaults.
