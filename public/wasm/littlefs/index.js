@@ -422,10 +422,18 @@ function createClient(Module, blockSize, blockCount) {
         },
 
         getDiskVersion() {
-            if (Module._lfs_wasm_get_disk_version) {
-                return Module._lfs_wasm_get_disk_version();
+            if (Module._lfs_wasm_get_fs_info) {
+                const versionPtr = Module._malloc(4);
+                try {
+                    const result = Module._lfs_wasm_get_fs_info(versionPtr);
+                    if (result === 0) {
+                        return Module.HEAPU32[versionPtr >> 2];
+                    }
+                } finally {
+                    Module._free(versionPtr);
+                }
             }
-            console.warn("[littlefs-wasm] getDiskVersion not available");
+            console.warn("[littlefs-wasm] getDiskVersion not available or filesystem not mounted");
             return 0;
         },
 
