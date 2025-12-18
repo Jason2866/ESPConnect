@@ -263,11 +263,13 @@ function createClient(Module, blockSize, blockCount) {
                         const size = Module.HEAPU32[sizePtr >> 2];
 
                         const entryPath = path === "/" ? `/${name}` : `${path}/${name}`;
+                        // type: 1 = file (LFS_TYPE_REG), 2 = directory (LFS_TYPE_DIR)
+                        const isDir = type === 2;
                         entries.push({
                             path: entryPath,
                             name,
-                            size: type === 2 ? size : 0,
-                            type: type === 1 ? "dir" : "file"
+                            size: isDir ? 0 : size,  // Files have size, directories don't
+                            type: isDir ? "dir" : "file"
                         });
                     }
                 } finally {
