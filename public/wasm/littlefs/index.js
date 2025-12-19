@@ -84,7 +84,8 @@ export async function createLittleFS(options = {}) {
     const Module = await createLittleFSModule(moduleConfig);
     console.info("[littlefs-wasm] Emscripten module loaded");
 
-    // Set disk version before init
+    // Set disk version before init to ensure new filesystems use the specified version
+    // and to prevent automatic migration from older versions
     if (Module._lfs_wasm_set_disk_version) {
         Module._lfs_wasm_set_disk_version(diskVersion);
         console.info("[littlefs-wasm] Disk version set to:", formatDiskVersion(diskVersion));
