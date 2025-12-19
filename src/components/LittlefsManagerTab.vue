@@ -229,6 +229,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { formatDiskVersion } from '../../public/wasm/littlefs/index.js';
 
 const props = defineProps({
   partitions: Array,
@@ -433,13 +434,6 @@ function formatSize(bytes) {
   }
   const formatted = val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
   return `${formatted} ${units[idx]}`;
-}
-
-function formatDiskVersion(version) {
-  if (!version) return '';
-  const major = (version >> 16) & 0xffff;
-  const minor = version & 0xffff;
-  return `${major}.${minor}`;
 }
 
 const diskVersion = computed(() => props.diskVersion);
