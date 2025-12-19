@@ -105,10 +105,13 @@ export async function createLittleFS(options = {}) {
         }
     }
 
-    // Mount
+    // Mount (with optional auto-format on failure)
     const mountResult = Module._lfs_wasm_mount();
     if (mountResult !== 0) {
-        // Try format and mount again
+        if (options.autoFormatOnMountFailure !== true) {
+            throw new LittleFSError(`Failed to mount LittleFS: ${mountResult}`, mountResult);
+        }
+        console.warn("[littlefs-wasm] Mount failed, attempting format and remount...");
         const formatResult = Module._lfs_wasm_format();
         if (formatResult !== 0) {
             throw new LittleFSError(`Failed to format LittleFS: ${formatResult}`, formatResult);
