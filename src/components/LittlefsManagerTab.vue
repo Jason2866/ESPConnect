@@ -251,7 +251,10 @@ const props = defineProps({
   hasPartition: Boolean,
   hasClient: Boolean,
   usage: Object,
-  diskVersion: Number,
+  diskVersion: {
+    type: Number,
+    default: 0,
+  },
   uploadBlocked: Boolean,
   uploadBlockedReason: String,
   isFileViewable: {
