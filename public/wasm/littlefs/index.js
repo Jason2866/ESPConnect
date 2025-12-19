@@ -52,6 +52,20 @@ export class LittleFSError extends Error {
     }
 }
 
+function createModuleConfig(wasmURL) {
+    const wasmURLStr = wasmURL instanceof URL ? wasmURL.href : wasmURL;
+    
+    return {
+        locateFile: (path) => {
+            if (path.endsWith('.wasm')) {
+                console.info("[littlefs-wasm] locateFile:", path, "->", wasmURLStr);
+                return wasmURLStr;
+            }
+            return path;
+        }
+    };
+}
+
 /**
  * Create a new LittleFS instance
  * @param {LittleFSOptions} options 
@@ -68,17 +82,7 @@ export async function createLittleFS(options = {}) {
     // Configure module with custom locateFile for WASM
     // Always set locateFile to ensure correct WASM path resolution
     const wasmURL = options.wasmURL ?? new URL('./littlefs.wasm', import.meta.url).href;
-    const wasmURLStr = wasmURL instanceof URL ? wasmURL.href : wasmURL;
-    
-    const moduleConfig = {
-        locateFile: (path) => {
-            if (path.endsWith('.wasm')) {
-                console.info("[littlefs-wasm] locateFile:", path, "->", wasmURLStr);
-                return wasmURLStr;
-            }
-            return path;
-        }
-    };
+    const moduleConfig = createModuleConfig(wasmURL);
 
     // Initialize Emscripten module
     const Module = await createLittleFSModule(moduleConfig);
@@ -143,17 +147,7 @@ export async function createLittleFSFromImage(image, options = {}) {
     // Configure module with custom locateFile for WASM
     // Always set locateFile to ensure correct WASM path resolution
     const wasmURL = options.wasmURL ?? new URL('./littlefs.wasm', import.meta.url).href;
-    const wasmURLStr = wasmURL instanceof URL ? wasmURL.href : wasmURL;
-    
-    const moduleConfig = {
-        locateFile: (path) => {
-            if (path.endsWith('.wasm')) {
-                console.info("[littlefs-wasm] locateFile:", path, "->", wasmURLStr);
-                return wasmURLStr;
-            }
-            return path;
-        }
-    };
+    const moduleConfig = createModuleConfig(wasmURL);
 
     // Initialize Emscripten module
     const Module = await createLittleFSModule(moduleConfig);
