@@ -87,43 +87,54 @@ export async function createLittleFS(options = {}) {
     // Initialize Emscripten module
     const Module = await createLittleFSModule(moduleConfig);
     console.info("[littlefs-wasm] Emscripten module loaded");
-
-    // Set disk version before init to ensure new filesystems use the specified version
-    // and to prevent automatic migration from older versions
-    if (Module._lfs_wasm_set_disk_version) {
-        Module._lfs_wasm_set_disk_version(diskVersion);
-        console.info("[littlefs-wasm] Disk version set to:", formatDiskVersion(diskVersion));
-    }
-
-    // Initialize LittleFS
-    const initResult = Module._lfs_wasm_init(blockSize, blockCount, lookaheadSize);
-    if (initResult !== 0) {
-        throw new LittleFSError(`Failed to initialize LittleFS: ${initResult}`, initResult);
-    }
-
-    // Format if requested
-    if (options.formatOnInit) {
-        const formatResult = Module._lfs_wasm_format();
-        if (formatResult !== 0) {
-            throw new LittleFSError(`Failed to format LittleFS: ${formatResult}`, formatResult);
+    try {
+        // Set disk version before init to ensure new filesystems use the specified version
+        // and to prevent automatic migration from older versions
+        if (Module._lfs_wasm_set_disk_version) {
+            Module._lfs_wasm_set_disk_version(diskVersion);
+            console.info("[littlefs-wasm] Disk version set to:", formatDiskVersion(diskVersion));
         }
-    }
 
-    // Mount (with optional auto-format on failure)
-    const mountResult = Module._lfs_wasm_mount();
-    if (mountResult !== 0) {
-        if (options.autoFormatOnMountFailure !== true) {
-            throw new LittleFSError(`Failed to mount LittleFS: ${mountResult}`, mountResult);
+        // Initialize LittleFS
+        const initResult = Module._lfs_wasm_init(blockSize, blockCount, lookaheadSize);
+        if (initResult !== 0) {
+            throw new LittleFSError(`Failed to initialize LittleFS: ${initResult}`, initResult);
         }
-        console.warn("[littlefs-wasm] Mount failed, attempting format and remount...");
-        const formatResult = Module._lfs_wasm_format();
-        if (formatResult !== 0) {
-            throw new LittleFSError(`Failed to format LittleFS: ${formatResult}`, formatResult);
+
+        // Format if requested
+        if (options.formatOnInit) {
+            const formatResult = Module._lfs_wasm_format();
+            if (formatResult !== 0) {
+                throw new LittleFSError(`Failed to format LittleFS: ${formatResult}`, formatResult);
+            }
         }
-        const retryMount = Module._lfs_wasm_mount();
-        if (retryMount !== 0) {
-            throw new LittleFSError(`Failed to mount LittleFS: ${retryMount}`, retryMount);
+
+        // Mount (with optional auto-format on failure)
+        const mountResult = Module._lfs_wasm_mount();
+        if (mountResult !== 0) {
+            if (options.autoFormatOnMountFailure !== true) {
+                throw new LittleFSError(`Failed to mount LittleFS: ${mountResult}`, mountResult);
+            }
+            console.warn("[littlefs-wasm] Mount failed, attempting format and remount...");
+            const formatResult = Module._lfs_wasm_format();
+            if (formatResult !== 0) {
+                throw new LittleFSError(`Failed to format LittleFS: ${formatResult}`, formatResult);
+            }
+            const retryMount = Module._lfs_wasm_mount();
+            if (retryMount !== 0) {
+                throw new LittleFSError(`Failed to mount LittleFS: ${retryMount}`, retryMount);
+            }
         }
+    } catch (error) {
+        // Clean up Module resources before rethrowing
+        if (Module._lfs_wasm_cleanup) {
+            try {
+                Module._lfs_wasm_cleanup();
+            } catch (cleanupError) {
+                console.error("[littlefs-wasm] Cleanup during error handling failed:", cleanupError);
+            }
+        }
+        throw error;
     }
 
     console.info("[littlefs-wasm] LittleFS mounted successfully");
