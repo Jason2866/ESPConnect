@@ -2441,6 +2441,8 @@ function resetLittlefsState() {
   littlefsState.blockSize = 0;
   littlefsState.blockCount = 0;
   littlefsState.currentPath = '/';
+  // Ensure disk version doesn’t leak between sessions
+  littlefsState.diskVersion = 0;
 }
 
 // Calculate LittleFS usage based on current entries.
