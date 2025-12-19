@@ -418,7 +418,11 @@ function createClient(Module, blockSize, blockCount) {
                 throw new LittleFSError("Failed to get image pointer", -1);
             }
 
-            return new Uint8Array(Module.HEAPU8.buffer, ptr, size).slice();
+            try {
+                return new Uint8Array(Module.HEAPU8.buffer, ptr, size).slice();
+            } finally {
+                Module._free(ptr);
+            }
         },
 
         getDiskVersion() {
