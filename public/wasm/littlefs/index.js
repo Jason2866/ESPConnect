@@ -376,7 +376,10 @@ function createClient(Module, blockSize, blockCount) {
                         }
                     }
                 } catch (e) {
-                    // Directory might be empty or not exist
+                    // Directory might be empty or not exist, log other errors
+                    if (e.code !== -2) { // -2 is ENOENT
+                        console.warn("[littlefs-wasm] Error during recursive delete:", e);
+                    }
                 }
             }
             this.deleteFile(path);
