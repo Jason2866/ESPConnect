@@ -47,18 +47,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '20'
           cache: 'npm'
 
-      - name: Update npm to latest
-        run: npm install -g npm@latest
-      - name: Check npm version
-        run: npm --version
-      - name: Install NPM
-        run: npm install
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build Vite application
         run: npm run build
