@@ -156,34 +156,48 @@ export async function createLittleFSFromImage(image, options = {}) {
     // When loading from image, don't set disk version (preserve existing)
     // This is important to not trigger migration
 
-    // Allocate memory for image
-    const imagePtr = Module._malloc(imageData.length);
-    if (!imagePtr) {
-        throw new LittleFSError("Failed to allocate memory for image", -1);
-    }
+    try {
+        // Allocate memory for image
+        const imagePtr = Module._malloc(imageData.length);
+        if (!imagePtr) {
+            throw new LittleFSError("Failed to allocate memory for image", -1);
+        }
 
-    // Copy image to WASM memory
-    Module.HEAPU8.set(imageData, imagePtr);
+        try {
+            // Copy image to WASM memory
+            Module.HEAPU8.set(imageData, imagePtr);
 
-    // Initialize from image
-    const initResult = Module._lfs_wasm_init_from_image(
-        imagePtr, 
-        imageData.length, 
-        blockSize, 
-        blockCount, 
-        lookaheadSize
-    );
-    
-    Module._free(imagePtr);
+            // Initialize from image
+            const initResult = Module._lfs_wasm_init_from_image(
+                imagePtr, 
+                imageData.length, 
+                blockSize, 
+                blockCount, 
+                lookaheadSize
+            );
+            
+            if (initResult !== 0) {
+                throw new LittleFSError(`Failed to initialize LittleFS from image: ${initResult}`, initResult);
+            }
+        } finally {
+            Module._free(imagePtr);
+        }
 
-    if (initResult !== 0) {
-        throw new LittleFSError(`Failed to initialize LittleFS from image: ${initResult}`, initResult);
-    }
-
-    // Mount
-    const mountResult = Module._lfs_wasm_mount();
-    if (mountResult !== 0) {
-        throw new LittleFSError(`Failed to mount LittleFS: ${mountResult}`, mountResult);
+        // Mount
+        const mountResult = Module._lfs_wasm_mount();
+        if (mountResult !== 0) {
+            throw new LittleFSError(`Failed to mount LittleFS: ${mountResult}`, mountResult);
+        }
+    } catch (error) {
+        // Clean up Module resources before rethrowing
+        if (Module._lfs_wasm_cleanup) {
+            try {
+                Module._lfs_wasm_cleanup();
+            } catch (cleanupError) {
+                console.error("[littlefs-wasm] Cleanup during error handling failed:", cleanupError);
+            }
+        }
+        throw error;
     }
 
     // Get disk version after mounting
