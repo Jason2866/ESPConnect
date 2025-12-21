@@ -680,6 +680,7 @@ import { findChipDocs } from './constants/chipDocsLinks';
 import { PWM_TABLE } from './utils/pwm-capabilities-table';
 import { parseNvsPartition, type NvsParseResult } from './lib/nvs/nvsParser';
 import type { AppPartitionMetadata } from './types/app-partitions';
+import type { DeviceDetails } from './types/device-details';
 
 let littlefsModulePromise = null;
 let fatfsModulePromise = null;
@@ -3751,7 +3752,7 @@ const transport = ref<CompatibleTransport | null>(null);
 const loader = ref<CompatibleLoader | null>(null);
 const firmwareBuffer = ref(null);
 const firmwareName = ref('');
-const chipDetails = ref(null);
+const chipDetails = ref<DeviceDetails | null>(null);
 const partitionFlashSizeLabel = computed(() => chipDetails.value?.flashSize ?? null);
 const partitionTable = ref([]);
 const activeTab = ref('info');
