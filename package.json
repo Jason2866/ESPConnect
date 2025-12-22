@@ -8,9 +8,13 @@
   "main": "electron/main.cjs",
   "author": "The Last Outpost Workshop",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "preview": "vite preview",
     "test": "vitest run",
     "start": "electron-forge start",
@@ -33,13 +37,14 @@
     "@electron-forge/maker-squirrel": "^7.6.0",
     "@electron-forge/maker-zip": "^7.6.0",
     "@electron-forge/plugin-auto-unpack-natives": "^7.6.0",
-    "@electron-forge/plugin-fuses": "^7.6.0",
-    "@electron/fuses": "^1.8.0",
+    "@electron/fuses": "^2.0.0",
     "@vitejs/plugin-vue": "^6.0.1",
     "electron": "^39.2.7",
     "sass": "^1.80.0",
     "vitest": "^4.0.16",
     "vite": "^7.1.12",
-    "vite-plugin-vuetify": "^2.0.3"
+    "vite-plugin-vuetify": "^2.0.3",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.2.1"
   }
 }
