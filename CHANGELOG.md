@@ -2,7 +2,8 @@
 
 ## 1.1.2-preview
 ### Improvement
-- Add reconnect after flashing operations so the ROM has time to finalize 
+- Add reconnect after flashing operations so the ROM has time to finalize
+- Append app version + timestamp to every log entry  
 
 ### Internal
 - Remove unused legacy code that was needed for esptool-js

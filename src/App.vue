@@ -5147,7 +5147,11 @@ function appendLog(message: string, detailOrPrefix: unknown = '[ESPConnect-ui]',
   }
 
   const detailText = detail != null ? ` ${formatErrorMessage(detail)}` : '';
-  const line = effectivePrefix ? `${effectivePrefix} ${message}${detailText}` : `${message}${detailText}`;
+  const timestamp = new Date().toISOString();
+  const versionTag = `v${APP_VERSION ?? '?.?'}`;
+  const meta = `${versionTag} ${timestamp}`;
+  const entry = effectivePrefix ? `${effectivePrefix} ${message}${detailText}` : `${message}${detailText}`;
+  const line = `${meta} ${entry}`;
   logBuffer.value += `${line}\n`;
 }
 
