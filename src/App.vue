@@ -205,8 +205,8 @@
             <v-window-item value="console">
               <SerialMonitorTab :monitor-text="monitorText" :monitor-active="monitorActive"
                 :monitor-error="monitorError" :can-start="canStartMonitor" :can-command="canIssueMonitorCommands"
-                @start-monitor="startMonitor" @stop-monitor="stopMonitor()"
-                @clear-monitor="clearMonitorOutput" @reset-board="resetBoard" />
+                @start-monitor="startMonitor" @stop-monitor="stopMonitor()" @clear-monitor="clearMonitorOutput"
+                @reset-board="resetBoard" />
             </v-window-item>
 
             <v-window-item value="log">
@@ -642,7 +642,7 @@ import { InMemorySpiffsClient } from './lib/spiffs/spiffsClient';
 import { useFatfsManager, useLittlefsManager, useSpiffsManager } from './composables/useFilesystemManagers';
 import { useDialogs } from './composables/useDialogs';
 import { readPartitionTable } from './utils/partitions';
-import { createEsptoolClient, requestSerialPort, type CompatibleLoader, type CompatibleTransport } from './services/esptoolClient';
+import { createEsptoolClient, requestSerialPort, type CompatibleLoader, type CompatibleTransport, type EsptoolClient } from './services/esptoolClient';
 import {
   SPIFFS_AUDIO_EXTENSIONS,
   SPIFFS_AUDIO_MIME_MAP,
@@ -1229,9 +1229,10 @@ async function handleLittlefsRestore(file: File | null) {
     littlefsState.status = `Restore file must be exactly ${formatBytes(partition.size) ?? `${partition.size} bytes`}.`;
     return;
   }
+  const fileLabel = file.name ? `"${file.name}"` : 'the selected image';
   const confirmed = await showConfirmation({
     title: 'Restore LittleFS Partition',
-    message: 'This will overwrite the entire LittleFS partition with the selected image. Continue?',
+    message: `This will overwrite the entire LittleFS partition with ${fileLabel}. Continue?`,
     confirmText: 'Restore',
     destructive: true,
   });
@@ -2017,9 +2018,10 @@ async function handleFatfsRestore(file: File | null) {
     fatfsState.status = `Restore file must be exactly ${formatBytes(partition.size) ?? `${partition.size} bytes`}.`;
     return;
   }
+  const fileLabel = file.name ? `"${file.name}"` : 'the selected image';
   const confirmed = await showConfirmation({
     title: 'Restore FATFS Partition',
-    message: 'This will overwrite the entire FATFS partition with the selected image. Continue?',
+    message: `This will overwrite the entire FATFS partition with ${fileLabel}. Continue?`,
     confirmText: 'Restore',
     destructive: true,
   });
@@ -2969,10 +2971,11 @@ async function handleSpiffsRestore(file: File | null) {
     spiffsState.status = `Restore file must be exactly ${formatBytes(partition.size) ?? `${partition.size} bytes`}.`;
     return;
   }
+  const fileLabel = file.name ? `"${file.name}"` : 'the selected image';
   const confirmed = await showConfirmation({
     title: 'Restore SPIFFS Partition',
     message:
-      'This will overwrite the entire SPIFFS partition with the selected image. Continue?',
+      `This will overwrite the entire SPIFFS partition with ${fileLabel}. Continue?`,
     confirmText: 'Restore',
     destructive: true,
   });
@@ -3449,6 +3452,17 @@ async function writeFilesystemImage(partition: any, image: Uint8Array, options: 
     partition.offset,
     compress
   );
+  const finishingLabel = `Finalizing ${label}...`;
+  if (state) {
+    state.status = finishingLabel;
+  }
+  onProgress?.({
+    value: 100,
+    label: finishingLabel,
+    written: image.length,
+    total: image.length,
+  });
+  await esptoolClient.value?.syncWithStub();
 }
 
 const FILESYSTEM_LOAD_CANCELLED_MESSAGE = 'Filesystem load cancelled by user';
@@ -3865,6 +3879,7 @@ let confirmationResolver: ((confirmed: boolean) => void) | null = null;
 const currentPort = ref<SerialPort | null>(null);
 const transport = shallowRef<CompatibleTransport | null>(null);
 const loader = shallowRef<CompatibleLoader | null>(null);
+const esptoolClient = shallowRef<EsptoolClient | null>(null);
 const firmwareBuffer = ref<ArrayBuffer | null>(null);
 const firmwareName = ref('');
 const chipDetails = ref<DeviceDetails | null>(null);
@@ -4015,6 +4030,7 @@ async function setConnectionBaud(targetBaud: string | number, options: SetBaudOp
       }
       loader.value.baudrate = parsed;
       await loader.value.setBaudrate(parsed);
+      await loader.value.sleep(300); // Fix needed for Native USB (0x1001), otherwise an error is raised 
       if (transport.value) {
         transport.value.baudrate = parsed;
       }
@@ -4699,26 +4715,26 @@ const MIN_SEGMENT_PERCENT = 1; // ensure tiny partitions remain hoverable in the
 
 type PartitionMapSegment =
   | {
-      kind: 'unused';
-      key: string;
-      offset: number;
-      size: number;
-    }
+    kind: 'unused';
+    key: string;
+    offset: number;
+    size: number;
+  }
   | {
-      kind: 'reserved';
-      key: string;
-      offset: number;
-      size: number;
-      label: string;
-      color: string;
-    }
+    kind: 'reserved';
+    key: string;
+    offset: number;
+    size: number;
+    label: string;
+    color: string;
+  }
   | {
-      kind: 'partition';
-      key: string;
-      offset: number;
-      size: number;
-      entry: PartitionTableEntry;
-    };
+    kind: 'partition';
+    key: string;
+    offset: number;
+    size: number;
+    entry: PartitionTableEntry;
+  };
 
 const partitionSegments = computed<PartitionSegment[]>(() => {
   if (!connected.value) {
@@ -5134,7 +5150,11 @@ function appendLog(message: string, detailOrPrefix: unknown = '[ESPConnect-ui]',
   }
 
   const detailText = detail != null ? ` ${formatErrorMessage(detail)}` : '';
-  const line = effectivePrefix ? `${effectivePrefix} ${message}${detailText}` : `${message}${detailText}`;
+  const timestamp = new Date().toISOString();
+  const versionTag = `v${APP_VERSION ?? '?.?'}`;
+  const meta = `${versionTag} ${timestamp}`;
+  const entry = effectivePrefix ? `${effectivePrefix} ${message}${detailText}` : `${message}${detailText}`;
+  const line = `${meta} ${entry}`;
   logBuffer.value += `${line}\n`;
 }
 
@@ -5436,6 +5456,7 @@ async function stopMonitor(options: StopMonitorOptions = {}) {
 
   busy.value = true;
   maintenanceReturnInProgress.value = true;
+  appendLog('Returning to maintenance mode.', '[ESPConnect-ui]');
   connectDialog.label = 'Returning to maintenance mode...';
   connectDialog.message = 'Re-entering ROM bootloader...';
   connectDialog.visible = true;
@@ -5518,6 +5539,7 @@ async function disconnectTransport() {
     transport.value = null;
     currentPort.value = null;
     loader.value = null;
+    esptoolClient.value = null;
     connected.value = false;
     chipDetails.value = null;
     flashSizeBytes.value = null;
@@ -5583,8 +5605,8 @@ async function connect() {
     const usbBridge = portDetails ? formatUsbBridge(portDetails) : "Unknown";
     const bridge =
       portDetails &&
-      typeof portDetails.usbVendorId === 'number' &&
-      typeof portDetails.usbProductId === 'number'
+        typeof portDetails.usbVendorId === 'number' &&
+        typeof portDetails.usbProductId === 'number'
         ? getUsbDeviceInfo(portDetails.usbVendorId, portDetails.usbProductId)
         : undefined;
 
@@ -5616,9 +5638,11 @@ async function connect() {
         appendLog(msg, '[ESPConnect-Debug]');
       },
     });
-    const transportInstance = esptool.transport;
+    esptoolClient.value = esptool;
+    const client = esptoolClient.value;
+    const transportInstance = client.transport;
     transport.value = transportInstance;
-    loader.value = esptool.loader;
+    loader.value = client.loader;
     currentBaud.value = connectBaud_defaultROM;
     transportInstance.baudrate = connectBaud_defaultROM;
 
@@ -5632,7 +5656,7 @@ async function connect() {
 
     // Open the serial port, talk to the ROM bootloader, load the stub flasher
     connectDialog.message = 'Handshaking with ROM bootloader...';
-    const esp = await esptool.connectAndHandshake();
+    const esp = await client.connectAndHandshake();
     currentBaud.value = desiredBaud || connectBaud_defaultROM;
     transportInstance.baudrate = currentBaud.value;
     const previousSuspendState = suspendBaudWatcher;
@@ -5646,7 +5670,7 @@ async function connect() {
 
     lastFlashBaud.value = currentBaud.value;
 
-    const metadata = await esptool.readChipMetadata();
+    const metadata = await client.readChipMetadata();
 
     const descriptionRaw = metadata.description ?? esp.chipName;
     const featuresRaw = metadata.features;
@@ -5659,7 +5683,7 @@ async function connect() {
       '[ESPConnect-Debug]'
     );
 
-    const flashId = await esptool.loader.flashId();
+    const flashId = await client.loader.flashId();
     const id = Number.isFinite(flashId) ? flashId : null;
 
     const manufacturerCode = id !== null ? id & 0xff : null;
@@ -5708,11 +5732,8 @@ async function connect() {
       const detail = PACKAGE_FORM_FACTORS[packageMatch[1]];
       pushFact('Package Form Factor', detail);
     }
-    // if (macLabel && macLabel !== 'Unavailable') {
-    //   pushFact('MAC Address', macLabel);
-    // }
+
     pushFact('Revision', resolveRevisionLabel(esp.chipName, metadata.chipRevision, metadata.majorVersion, metadata.minorVersion));
-    // pushFact('Flash Size', flashLabel);
 
     const embeddedFlash = resolveEmbeddedFlash(esp.chipName, metadata.flashCap, metadata.flashVendor, featureList);
     pushFact('Embedded Flash', embeddedFlash);
@@ -6025,10 +6046,10 @@ async function flashFirmware() {
       offsetNumber,
       true
     );
-
-    await loader.value.hardReset();
-    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
     flashProgressDialog.value = 100;
+    flashProgressDialog.label = 'Finalizing Flash...'
+    await esptoolClient.value?.syncWithStub();
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
     flashProgressDialog.label = `Flash complete in ${elapsed}s @ ${flashBaudLabel}. Finalizing...`;
     appendLog(`Flashing complete in ${elapsed}s. Device rebooted.`);
   } catch (error) {
