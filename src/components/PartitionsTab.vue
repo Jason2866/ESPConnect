@@ -17,7 +17,10 @@
   <div v-else class="partition-view">
     <v-card variant="tonal" prepend-icon="mdi-table">
       <template v-slot:title>
-        <span class="font-weight-black">{{ partitionCardTitle }}</span>
+        <div class="partition-title">
+          <span class="font-weight-black">{{ partitionCardTitle }}</span>
+          <span class="partition-used">{{ t('partitions.usageSummary', { size: totalUsedDisplay }) }}</span>
+        </div>
       </template>
       <v-alert v-if="showUnusedAlert" type="warning" variant="tonal" class="unused-alert">
         <div>
@@ -32,8 +35,11 @@
             {{ t('partitions.alerts.resources.tutorial') }}
           </a>
           {{ t('partitions.alerts.unusedFlash.or') }}
-          <a href="https://thelastoutpostworkshop.github.io/microcontroller_devkit/esp32partitionbuilder/"
-            target="_blank" rel="noopener noreferrer">
+          <a
+            :href="partitionBuilderUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             {{ t('partitions.alerts.resources.builder') }}
           </a>.
         </div>
@@ -44,8 +50,11 @@
           {{ t('partitions.alerts.resources.tutorial') }}
         </a>
         {{ t('partitions.alerts.customizeOr') }}
-        <a href="https://thelastoutpostworkshop.github.io/microcontroller_devkit/esp32partitionbuilder/"
-          target="_blank" rel="noopener noreferrer">
+        <a
+          :href="partitionBuilderUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           {{ t('partitions.alerts.resources.builder') }}
         </a>.
       </v-alert>
@@ -119,8 +128,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRefs } from 'vue';
+import { computed, onMounted, toRefs } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { Buffer } from 'buffer';
 import type { FormattedPartitionRow, PartitionSegment, UnusedFlashSummary } from '../types/partitions';
 
 const props = withDefaults(
@@ -141,6 +151,10 @@ const props = withDefaults(
 const { partitionSegments, formattedPartitions, unusedSummary, flashSizeLabel } = toRefs(props);
 const { t } = useI18n();
 
+const PARTITION_BUILDER_URL =
+  'https://thelastoutpostworkshop.github.io/ESP32PartitionBuilder/';
+const PARTITION_CSV_HEADER = '# Name,Type,SubType,Offset,Size,Flags';
+
 const showUnusedAlert = computed(() => Boolean(unusedSummary.value));
 const unusedReadable = computed(() => unusedSummary.value?.readable ?? '');
 const unusedBytesDisplay = computed(() =>
@@ -150,6 +164,161 @@ const partitionCardTitle = computed(() => {
   const label = flashSizeLabel.value?.trim();
   return label ? t('partitions.cardTitleWithSize', { size: label }) : t('partitions.cardTitle');
 });
+const partitionCsvRows = computed(() =>
+  formattedPartitions.value.filter(
+    row => row.size > 0 && !row.isUnused && !isReservedPartition(row),
+  ),
+);
+const totalUsedBytes = computed(() => partitionCsvRows.value.reduce((total, row) => total + row.size, 0));
+const totalUsedDisplay = computed(() => formatBytes(totalUsedBytes.value) || `${totalUsedBytes.value} bytes`);
+const totalFlashBytes = computed(() => {
+  return partitionSegments.value.reduce((max, segment) => {
+    const end = segment.offset + segment.size;
+    return Math.max(max, end);
+  }, 0);
+});
+
+const flashSizeMB = computed(() => {
+  const bytes = totalFlashBytes.value;
+  if (!bytes) {
+    return 1;
+  }
+  const mb = bytes / (1024 * 1024);
+  return Math.max(1, Math.round(mb));
+});
+
+const partitionBuilderUrl = computed(() => {
+  const rows = partitionCsvRows.value;
+  if (!rows.length) {
+    return PARTITION_BUILDER_URL;
+  }
+  const csv = buildPartitionCsv(rows);
+  console.debug('partition CSV:\n' + csv);
+  const encoded = encodeCsvAsBase64(csv);
+  return `${PARTITION_BUILDER_URL}?flash=${flashSizeMB.value}&partitions=base64:${encoded}`;
+});
+
+onMounted(() => {
+  logPartitionCsv(partitionCsvRows.value);
+});
+
+function buildPartitionCsv(rows: FormattedPartitionRow[]): string {
+  const lines = rows.map(row => formatPartitionCsvLine(row));
+  return `${PARTITION_CSV_HEADER}\n${lines.join('\n')}`;
+}
+
+function formatPartitionCsvLine(row: FormattedPartitionRow): string {
+  const name = row.label?.trim() || row.typeLabel || 'partition';
+  const typeSlug = getPartitionTypeSlug(row);
+  const subtypeSlug = getPartitionSubtypeSlug(row);
+  const offset = row.offsetHex || '0x0';
+  const sizeHex = `0x${row.size.toString(16).toUpperCase()}`;
+  return [escapeCsvValue(name), typeSlug, subtypeSlug, offset, sizeHex, ''].join(',');
+}
+
+function getPartitionTypeSlug(row: FormattedPartitionRow): string {
+  const typeValue = parsePartitionValue(row.type, row.typeHex);
+  if (typeValue === 0x00) return 'app';
+  if (typeValue === 0x01) return 'data';
+  return `type${formatByteHex(typeValue)}`;
+}
+
+function getPartitionSubtypeSlug(row: FormattedPartitionRow): string {
+  const typeValue = parsePartitionValue(row.type, row.typeHex);
+  const subtypeValue = parsePartitionValue(row.subtype, row.subtypeHex);
+  if (typeValue === 0x00) {
+    if (subtypeValue === 0x00) return 'factory';
+    if (subtypeValue === 0x01) return 'test';
+    if (subtypeValue >= 0x10 && subtypeValue <= 0x1f) return `ota_${subtypeValue - 0x10}`;
+    if (subtypeValue === 0x20) return 'any';
+    if (subtypeValue === 0x21) return 'ota_app';
+    return `subtype${formatByteHex(subtypeValue)}`;
+  }
+  if (typeValue === 0x01) {
+    return DATA_SUBTYPE_SLUG[subtypeValue] ?? `subtype${formatByteHex(subtypeValue)}`;
+  }
+  return `subtype${formatByteHex(subtypeValue)}`;
+}
+
+const DATA_SUBTYPE_SLUG: Record<number, string> = {
+  0x00: 'ota',
+  0x01: 'phy_init',
+  0x02: 'nvs',
+  0x03: 'coredump',
+  0x04: 'nvs_keys',
+  0x05: 'efuse_emulation',
+  0x06: 'undefined',
+  0x80: 'esphttpd_data',
+  0x81: 'fat',
+  0x82: 'spiffs',
+  0x83: 'littlefs',
+};
+
+function parsePartitionValue(value: number | undefined, fallback?: string | null): number {
+  if (typeof value === 'number' && !Number.isNaN(value)) {
+    return value;
+  }
+  if (fallback) {
+    const normalized = fallback.toLowerCase().replace(/^0x/, '');
+    const parsed = Number.parseInt(normalized, 16);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
+function formatByteHex(value: number): string {
+  return value.toString(16).padStart(2, '0').toLowerCase();
+}
+
+function escapeCsvValue(value: string): string {
+  const needsQuotes = /[",\n]/.test(value);
+  const escaped = value.replace(/"/g, '""');
+  return needsQuotes ? `"${escaped}"` : escaped;
+}
+
+function encodeCsvAsBase64(value: string): string {
+  if (typeof globalThis.btoa === 'function') {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(value);
+    const chunkSize = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return globalThis.btoa(binary);
+  }
+  return Buffer.from(value, 'utf-8').toString('base64');
+}
+
+function logPartitionCsv(rows: FormattedPartitionRow[]) {
+  if (!rows.length) {
+    console.info('partition CSV: (no partition rows)');
+    return;
+  }
+  console.info('partition CSV:\n' + buildPartitionCsv(rows));
+}
+
+function formatBytes(value: number | null | undefined): string | null {
+  if (value == null || value < 0) {
+    return null;
+  }
+  const units = ['bytes', 'KB', 'MB', 'GB', 'TB'];
+  let bytes = value;
+  let index = 0;
+  while (bytes >= 1024 && index < units.length - 1) {
+    bytes /= 1024;
+    index += 1;
+  }
+  const formatted = index === 0 ? `${bytes}` : bytes.toFixed(2);
+  return `${formatted} ${units[index]}`;
+}
+
+function isReservedPartition(row: FormattedPartitionRow): boolean {
+  const label = row.label?.trim().toLowerCase();
+  return label === 'bootloader' || label === 'partition table';
+}
 </script>
 
 <style scoped>
@@ -157,6 +326,18 @@ const partitionCardTitle = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.partition-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.partition-used {
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--v-theme-on-surface) 56%, transparent);
 }
 
 .partitions-empty {
