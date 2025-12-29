@@ -161,13 +161,12 @@ export class CompatibleTransport {
 }
 
 function createLogger(terminal: any, debugLogging: boolean): Logger {
+  const versionLabel = `v${tasmotaEsptoolVersion} webserial`;
   const writeLine = (msg: string, tag = 'ESPLoader') => {
-    const line = tag ? `[${tag}] ${msg}` : msg;
-    if (typeof terminal?.writeLine === 'function') {
-      terminal.writeLine(line);
-    } else if (typeof terminal?.write === 'function') {
-      terminal.write(`${line}\n`);
-    }
+    const timestamp = new Date().toISOString();
+    const prefix = `${versionLabel} ${timestamp} `;
+    const line = tag ? `${prefix} [${tag}]  ${msg}` : `${prefix} ${msg}`;
+    terminal.writeLine(line);
   };
 
   return {
@@ -348,7 +347,7 @@ export function createEsptoolClient({
         securityInfo = await loader.getSecurityInfo();
         securityFacts = buildSecurityFacts(securityInfo, chipName);
       } catch (error) {
-        logger.error('Cannot read security information');
+        logger.error('Cannot read security information', error);
       }
 
       const result: ConnectHandshakeResult = { chipName, macAddress, securityFacts, flashSize: loader.flashSize };

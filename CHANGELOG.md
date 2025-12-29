@@ -1,6 +1,21 @@
 # Changelog
 
-## 1.1.2-preview
+## 1.1.3-preview-6
+### Improvement
+- Session log now shows the version of tasmota-webserial-esptool package along with a timestamp
+- Failed detection of flashid is now non-fatal
+
+### Fixed 
+- FATFS is now using 4096 bytes for logical sectors
+- Ensure ESP32 SPIFFS headers reserve the default 4 bytes of metadata to match the ESP-IDF layout related to ([issue #77](https://github.com/thelastoutpostworkshop/ESPConnect/issues/77)).
+
+### Internal
+- Serial Monitor start now use native tasmota-webserial-esptool hardreset(false) to enter user firmware
+- Bumps tasmota-webserial-esptool from 7.2.2 to 7.2.3
+- Bumps vuetify from 3.11.4 to 3.11.5
+- Bumps vue-i18n from 9.14.5 to 11.2.7. 
+
+## 1.1.2
 ### Improvement
 - Internationalization: Migrated UI translations to the standard Vue I18n + Vuetify integration.
 This replaces the previous DOM-based translation shim with a fully reactive, maintainable solution.
