@@ -5712,9 +5712,9 @@ async function connect() {
           payload.translationKey != null
             ? t(payload.translationKey, payload.params ?? {})
             : payload.message ?? '';
-        const englishMessage = payload.message ?? '';
-        if (englishMessage) {
-          appendLog(englishMessage, '[ESPConnect-Debug]');
+        const sessionLogMessage = payload.message ?? '';
+        if (sessionLogMessage) {
+          appendLog(sessionLogMessage, '[ESPConnect-Debug]');
         }
         const showInDialog = payload.showInDialog ?? true;
         if (showInDialog && dialogText) {
