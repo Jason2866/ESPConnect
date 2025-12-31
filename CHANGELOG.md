@@ -8,7 +8,8 @@
 - Connect dialog now displays localized status updates while the bootloader workflow runs
 ### Fixed 
 - Fixed error in the Serial Monitor component when clearing the filter output
-
+### Internal
+- Added Vitest to fatfs fixture
 ## 1.1.3
 ### Improvement
 - Session log now shows the version of tasmota-webserial-esptool package along with a timestamp
