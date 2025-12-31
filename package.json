@@ -17,6 +17,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:fatfs": "vitest run src/tests/fatfs.fixture.test.ts",
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
