@@ -1,6 +1,28 @@
 # Changelog
 
-## 1.1.3-preview-6
+## 1.1.5-preview
+
+### Internal
+- Removed the decorateLoader shim since it's no longer needed with tasmota-webserial-esptool
+- Added Playwright E2E scaffolding with a mocked WebSerial/esptool client
+
+## 1.1.4
+### Improvement
+- Fat filesystem now supports folders
+- Automatically detect the browser language: On the first visit, it automatically matches the supported language (en, fr, zh) based on the browser settings by MeatSuger
+ ([PR #96](https://github.com/thelastoutpostworkshop/ESPConnect/pull/96)).
+- Serial monitor start button now shows a loading indicator while the monitor is being initialized
+- Delay removed for the connection dialog
+- Connect dialog now displays localized status updates while the bootloader workflow runs
+### Fixed 
+- Fixed error in the Serial Monitor component when clearing the filter output
+### Internal
+- Added Vitest to fatfs fixture
+- Added Vitest to littlefs fixture
+- Added Vitest to spiffs fixture
+### New Contributors
+- [MeatSuger](https://github.com/MeatSuger) made their first contribution in ([PR #96](https://github.com/thelastoutpostworkshop/ESPConnect/pull/96))
+## 1.1.3
 ### Improvement
 - Session log now shows the version of tasmota-webserial-esptool package along with a timestamp
 - Failed detection of flashid is now non-fatal
@@ -12,6 +34,7 @@
 
 ### Internal
 - Serial Monitor start now use native tasmota-webserial-esptool hardreset(false) to enter user firmware
+- Extracted deterministic helpers and added unit tests
 - Bumps tasmota-webserial-esptool from 7.2.2 to 7.2.3
 - Bumps vuetify from 3.11.4 to 3.11.5
 - Bumps vue-i18n from 9.14.5 to 11.2.7. 

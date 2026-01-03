@@ -29,12 +29,12 @@
     <v-app-bar app :elevation="8">
       <div class="status-actions">
         <v-btn color="primary" variant="outlined" density="comfortable"
-          :disabled="!serialSupported || connected || busy" @click="connect">
+          :disabled="!serialSupported || connected || busy" @click="connect" data-testid="connect-btn">
           <v-icon start>mdi-usb-flash-drive</v-icon>
           {{ t('actions.connect') }}
         </v-btn>
         <v-btn color="error" variant="outlined" density="comfortable" :disabled="!connected || busy"
-          @click="disconnect">
+          @click="disconnect" data-testid="disconnect-btn">
           <v-icon start>mdi-close-circle</v-icon>
           {{ t('actions.disconnect') }}
         </v-btn>
@@ -75,7 +75,7 @@
         <v-icon>{{ themeIcon }}</v-icon>
       </v-btn>
       <v-chip :color="connected ? 'success' : 'grey-darken-1'" class="text-capitalize" variant="elevated"
-        density="comfortable">
+        density="comfortable" data-testid="connection-status">
         <template #prepend>
           <v-icon v-if="connected" start class="status-chip-icon status-chip-icon--connected">
             mdi-usb-port
@@ -161,21 +161,29 @@
             </v-window-item>
 
             <v-window-item value="fatfs">
-              <FilesystemManagerTab v-if="connected && fatfsAvailable" :partitions="fatfsPartitions"
-                :selected-partition-id="fatfsState.selectedId" :files="fatfsState.files" :status="fatfsState.status"
-                :loading="fatfsState.loading" :busy="fatfsState.busy" :saving="fatfsState.saving"
-                :read-only="fatfsState.readOnly" :read-only-reason="fatfsState.readOnlyReason" :dirty="fatfsState.dirty"
+              <LittlefsManagerTab v-if="connected && fatfsAvailable" :partitions="fatfsPartitions"
+                :selected-partition-id="fatfsState.selectedId" :files="fatfsVisibleFiles"
+                :current-path="fatfsState.currentPath" :status="fatfsState.status" :loading="fatfsState.loading"
+                :busy="fatfsState.busy" :saving="fatfsState.saving" :read-only="fatfsState.readOnly"
+                :read-only-reason="fatfsState.readOnlyReason" :dirty="fatfsState.dirty"
                 :backup-done="fatfsState.backupDone || fatfsState.sessionBackupDone" :error="fatfsState.error"
                 :has-partition="hasFatfsPartitionSelected" :has-client="Boolean(fatfsState.client)"
                 :usage="fatfsState.usage" :upload-blocked="fatfsState.uploadBlocked"
                 :upload-blocked-reason="fatfsState.uploadBlockedReason" :load-cancelled="fatfsState.loadCancelled"
+                :load-cancelled-message="t('filesystem.loadCancelled', {
+                  fs: 'FATFS',
+                  action: t('filesystem.controls.read'),
+                })"
                 fs-label="FATFS" partition-title="FATFS Partition"
                 empty-state-message="No FATFS files found. Read the partition or upload to begin."
                 :is-file-viewable="isViewableSpiffsFile" :get-file-preview-info="resolveSpiffsViewInfo"
-                @select-partition="handleSelectFatfsPartition" @refresh="handleRefreshFatfs" @backup="handleFatfsBackup"
-                @restore="handleFatfsRestore" @download-file="handleFatfsDownloadFile" @view-file="handleFatfsView"
+                @select-partition="handleSelectFatfsPartition" @refresh="handleRefreshFatfs"
+                @backup="handleFatfsBackup" @restore="handleFatfsRestore"
+                @download-file="handleFatfsDownloadFile" @view-file="handleFatfsView"
                 @validate-upload="handleFatfsUploadSelection" @upload-file="handleFatfsUpload"
-                @delete-file="handleFatfsDelete" @format="handleFatfsFormat" @save="handleFatfsSave" />
+                @delete-file="handleFatfsDelete" @format="handleFatfsFormat" @save="handleFatfsSave"
+                @navigate="handleFatfsNavigate" @navigate-up="handleFatfsNavigateUp"
+                @new-folder="handleFatfsNewFolder" @reset-upload-block="handleFatfsResetUploadBlock" />
               <DisconnectedState v-else icon="mdi-alpha-f-circle-outline" :min-height="420"
                 :title="t('disconnected.defaultTitle')" :subtitle="t('disconnected.fatfs')" />
             </v-window-item>
@@ -219,9 +227,9 @@
             </v-window-item>
             <v-window-item value="console">
               <SerialMonitorTab :monitor-text="monitorText" :monitor-active="monitorActive"
-                :monitor-error="monitorError" :can-start="canStartMonitor" :can-command="canIssueMonitorCommands"
-                @start-monitor="startMonitor" @stop-monitor="stopMonitor()" @clear-monitor="clearMonitorOutput"
-                @reset-board="enterUserFirmware" />
+                :monitor-error="monitorError" :monitor-starting="monitorStarting" :can-start="canStartMonitor"
+                :can-command="canIssueMonitorCommands" @start-monitor="startMonitor" @stop-monitor="stopMonitor()"
+                @clear-monitor="clearMonitorOutput" @reset-board="enterUserFirmware" />
             </v-window-item>
 
             <v-window-item value="log">
@@ -630,7 +638,8 @@
           </v-card>
         </v-dialog>
 
-        <v-snackbar v-model="toast.visible" :timeout="toast.timeout" :color="toast.color" location="bottom right">
+        <v-snackbar v-model="toast.visible" :timeout="toast.timeout" :color="toast.color" location="bottom right"
+          data-testid="toast-container">
           {{ toast.message }}
         </v-snackbar>
       </v-container>
@@ -659,7 +668,8 @@ import { useFatfsManager, useLittlefsManager, useSpiffsManager } from './composa
 import { useDialogs } from './composables/useDialogs';
 import { getLanguage, setLanguage, SupportedLocale } from './plugins/i18n';
 import { readPartitionTable } from './utils/partitions';
-import { createEsptoolClient, requestSerialPort, type CompatibleLoader, type CompatibleTransport, type EsptoolClient } from './services/esptoolClient';
+import type { ESPLoader } from 'tasmota-webserial-esptool';
+import { createEsptoolClient, requestSerialPort, type CompatibleTransport, type EsptoolClient, type StatusPayload } from './services/esptoolClient';
 import {
   SPIFFS_AUDIO_EXTENSIONS,
   SPIFFS_AUDIO_MIME_MAP,
@@ -768,6 +778,29 @@ function normalizeFsPath(path: string | null | undefined = '/') {
   return p || '/';
 }
 
+const FATFS_MOUNT_PREFIX = '/fatfs';
+
+function toFatfsClientPath(path: string | null | undefined = '/') {
+  const normalized = normalizeFsPath(path);
+  if (normalized === '/') {
+    return FATFS_MOUNT_PREFIX;
+  }
+  return `${FATFS_MOUNT_PREFIX}${normalized}`;
+}
+
+function stripFatfsMountPath(value?: string | null) {
+  if (!value) {
+    return value;
+  }
+  if (value === FATFS_MOUNT_PREFIX) {
+    return '/';
+  }
+  if (value.startsWith(`${FATFS_MOUNT_PREFIX}/`)) {
+    return value.slice(FATFS_MOUNT_PREFIX.length);
+  }
+  return value;
+}
+
 // Estimate LittleFS storage footprint for a single file (data + metadata block).
 function littlefsEstimateFileFootprint(size = 0) {
   const block = littlefsState.blockSize || 1;
@@ -873,6 +906,22 @@ function normalizeLittlefsEntries(entries: unknown, basePath = '/'): LittlefsEnt
       };
     })
     .filter((entry): entry is LittlefsEntry => Boolean(entry));
+}
+
+function normalizeFatfsEntries(entries: unknown, basePath = '/'): LittlefsEntry[] {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  const adjusted = entries.map(entry => {
+    if (entry && typeof entry === 'object') {
+      const rawPath = (entry as Record<string, unknown>).path;
+      if (typeof rawPath === 'string') {
+        return { ...entry, path: stripFatfsMountPath(rawPath) };
+      }
+    }
+    return entry;
+  });
+  return normalizeLittlefsEntries(adjusted, basePath);
 }
 
 // Detect common signatures that indicate an unformatted LittleFS image.
@@ -1866,8 +1915,8 @@ async function loadFatfsPartition(partition: FilesystemPartition) {
       }
     }
     fatfsState.client = client;
-    const entries = client.list?.() ?? [];
-    fatfsState.files = normalizeLittlefsEntries(entries);
+    fatfsState.currentPath = '/';
+    await refreshFatfsListing();
     fatfsState.baselineFiles = fatfsState.files.map(file => ({ ...file }));
     fatfsState.dirty = false;
     fatfsState.backupDone = false;
@@ -1912,13 +1961,25 @@ async function loadFatfsPartition(partition: FilesystemPartition) {
   }
 }
 
-// Refresh the FATFS file listing and usage.
+// Refresh the FATFS file listing and usage for the current path.
 async function refreshFatfsListing() {
   if (!fatfsState.client) {
     return;
   }
-  const entries = fatfsState.client.list?.() ?? [];
-  fatfsState.files = normalizeLittlefsEntries(entries);
+  const rootEntries = fatfsState.client.list?.(FATFS_MOUNT_PREFIX) ?? [];
+  fatfsState.allFiles = normalizeFatfsEntries(rootEntries, '/');
+  const clientPath = toFatfsClientPath(fatfsState.currentPath || '/');
+  const entries = fatfsState.client.list?.(clientPath) ?? [];
+  fatfsState.files = normalizeFatfsEntries(entries, fatfsState.currentPath);
+  try {
+    console.info(
+      '[ESPConnect-FATFS] entries @',
+      fatfsState.currentPath,
+      fatfsState.files.map(entry => `${entry.type === 'dir' ? 'dir ' : 'file'} ${entry.path}`),
+    );
+  } catch {
+    // ignore console errors
+  }
   updateFatfsUsage();
 }
 
@@ -1931,6 +1992,7 @@ function handleSelectFatfsPartition(partitionId: string | number | null) {
   fatfsState.selectedId = id;
   fatfsState.client = null;
   fatfsState.files = [];
+  fatfsState.currentPath = '/';
   fatfsState.status = 'Loading FATFS...';
   const partition =
     (id != null ? fatfsPartitions.value.find(entry => entry.id === id) : null) ?? fatfsPartitions.value[0];
@@ -2083,11 +2145,21 @@ function handleFatfsUploadSelection(file: File | null) {
     return;
   }
   const partition = fatfsSelectedPartition.value;
+  updateFatfsUsage(partition);
+  const targetPath = joinFsPath(fatfsState.currentPath || '/', file.name);
+  const usageSource = fatfsState.allFiles?.length ? fatfsState.allFiles : fatfsState.files;
+  const existingEntry = usageSource.find(entry => entry.path === targetPath);
+  const existingSize = existingEntry?.size ?? 0;
   const partitionSize = partition?.size ?? fatfsState.blockSize * fatfsState.blockCount;
-  const usedBytes = fatfsState.files.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
-  const existingSize = fatfsState.files.find(entry => entry.name === file.name)?.size ?? 0;
-  const availableBytes = partitionSize ? partitionSize - usedBytes + existingSize : 0;
-  if (partitionSize && file.size > availableBytes) {
+  const usedBytes = usageSource.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+  const freeBytes =
+    typeof fatfsState.usage?.freeBytes === 'number'
+      ? fatfsState.usage.freeBytes
+      : partitionSize
+        ? Math.max(partitionSize - usedBytes, 0)
+        : Number.POSITIVE_INFINITY;
+  const availableBytes = Number.isFinite(freeBytes) ? Math.max(freeBytes + existingSize, 0) : Number.POSITIVE_INFINITY;
+  if (partitionSize && Number.isFinite(availableBytes) && file.size > availableBytes) {
     const message =
       'Not enough FATFS space for this file. Delete files or format the partition, then try again.';
     fatfsState.uploadBlocked = true;
@@ -2101,8 +2173,15 @@ function handleFatfsUploadSelection(file: File | null) {
   fatfsState.uploadBlockedReason = '';
 }
 
-// Upload a file to FATFS with size checks and staging.
-async function handleFatfsUpload({ file }: { file: File }) {
+// Queue a FATFS upload to avoid parallel writes.
+function handleFatfsUpload(payload: LittlefsUploadPayload) {
+  fatfsUploadQueue = fatfsUploadQueue.then(() => performFatfsUpload(payload));
+  return fatfsUploadQueue;
+}
+
+// Perform a FATFS upload or folder creation with directory support.
+async function performFatfsUpload(payload: LittlefsUploadPayload) {
+  const { file, path = '', isDir } = payload;
   if (!fatfsState.client) return;
   if (fatfsState.readOnly) {
     fatfsState.status = fatfsState.readOnlyReason || 'FATFS is read-only.';
@@ -2116,9 +2195,11 @@ async function handleFatfsUpload({ file }: { file: File }) {
     }
     return;
   }
+  const derivedIsDir = isDir === true || (!file && !!path);
   if (!file) {
-    fatfsState.status = 'Select a file to upload.';
-    showToast(fatfsState.status, { color: 'info' });
+    if (derivedIsDir && path) {
+      await handleFatfsNewFolder(path);
+    }
     return;
   }
   const targetName = (file.name || '').trim();
@@ -2127,29 +2208,91 @@ async function handleFatfsUpload({ file }: { file: File }) {
     showToast(fatfsState.status, { color: 'warning' });
     return;
   }
+  const relativePath = path || targetName;
+  const target = joinFsPath(fatfsState.currentPath || '/', relativePath);
+  updateFatfsUsage(fatfsSelectedPartition.value);
+  const usageSource = fatfsState.allFiles?.length ? fatfsState.allFiles : fatfsState.files;
+  const existingEntry = usageSource.find(entry => entry.path === target);
+  const existingSize = existingEntry?.size ?? 0;
+  const capacityBytes =
+    fatfsState.usage?.capacityBytes ?? fatfsSelectedPartition.value?.size ?? fatfsState.blockSize * fatfsState.blockCount;
+  const freeBytes =
+    typeof fatfsState.usage?.freeBytes === 'number'
+      ? fatfsState.usage.freeBytes
+      : Number.isFinite(capacityBytes)
+        ? Math.max(capacityBytes - usageSource.reduce((sum, entry) => sum + (entry.size ?? 0), 0), 0)
+        : Number.POSITIVE_INFINITY;
+  const availableBytes = Number.isFinite(freeBytes) ? Math.max(freeBytes + existingSize, 0) : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(capacityBytes) && Number.isFinite(availableBytes) && file.size > availableBytes) {
+    const message =
+      'Not enough FATFS space for this upload. Delete files or format the partition, then try again.';
+    fatfsState.uploadBlocked = true;
+    fatfsState.uploadBlockedReason = message;
+    fatfsState.status = message;
+    showUploadError(message);
+    return;
+  }
+
   try {
     fatfsState.busy = true;
     const data = new Uint8Array(await file.arrayBuffer());
-    fatfsState.client.writeFile(targetName, data);
+    const segments = target.split('/').filter(Boolean);
+    let built = '';
+    if (segments.length > 1 && typeof fatfsState.client.mkdir === 'function') {
+      for (let i = 0; i < segments.length - 1; i++) {
+        built += `/${segments[i]}`;
+        try {
+          fatfsState.client.mkdir(toFatfsClientPath(built));
+        } catch {
+          // ignore if already exists
+        }
+      }
+    }
+    const clientPath = toFatfsClientPath(target);
+    fatfsState.client.writeFile(clientPath, data);
     await refreshFatfsListing();
-    markFatfsDirty(`Staged ${targetName}. Remember to Save.`);
-    appendLog(`FATFS staged ${targetName} (${data.length.toLocaleString()} bytes).`, '[ESPConnect-Debug]');
+    markFatfsDirty(`Staged ${target}. Remember to Save.`);
+    appendLog(`FATFS staged ${target} (${data.length.toLocaleString()} bytes).`, '[ESPConnect-Debug]');
   } catch (error) {
-    fatfsState.error = formatErrorMessage(error);
-    showToast(fatfsState.error, { color: 'error' });
+    const msg = formatErrorMessage(error);
+    const code = isRecord(error) && typeof error.code === 'number' ? error.code : null;
+    const normalized = msg.toLowerCase();
+    const spaceError =
+      normalized.includes('no space') ||
+      normalized.includes('nospace') ||
+      normalized.includes('enospc');
+    if (spaceError) {
+      fatfsState.uploadBlocked = true;
+      fatfsState.uploadBlockedReason = msg;
+      fatfsState.status = msg;
+      showUploadError(msg);
+      try {
+        fatfsState.client.deleteFile(toFatfsClientPath(target));
+      } catch {
+        // ignore cleanup issues
+      }
+      await refreshFatfsListing();
+    } else {
+      fatfsState.error = msg;
+      showToast(msg, { color: 'error' });
+    }
   } finally {
     fatfsState.busy = false;
   }
 }
 
-// Delete a FATFS file after confirmation.
-async function handleFatfsDelete(name: string) {
+// Delete a FATFS file or directory after confirmation.
+async function handleFatfsDelete(path: string) {
   if (!fatfsState.client || fatfsState.readOnly) {
     return;
   }
+  const targetPath = normalizeFsPath(path);
+  const entries = fatfsState.allFiles?.length ? fatfsState.allFiles : fatfsState.files;
+  const entry = entries.find(f => normalizeFsPath(f.path) === targetPath);
+  const isDir = entry?.type === 'dir';
   const confirmed = await showConfirmation({
-    title: 'Delete File',
-    message: `Delete ${name} from FATFS? This cannot be undone.`,
+    title: isDir ? 'Delete Folder' : 'Delete File',
+    message: `Delete ${targetPath} from FATFS? This cannot be undone.`,
     confirmText: 'Delete',
     destructive: true,
   });
@@ -2158,15 +2301,101 @@ async function handleFatfsDelete(name: string) {
   }
   try {
     fatfsState.busy = true;
-    fatfsState.client.deleteFile(name);
+    await removeFatfsEntry(targetPath);
     await refreshFatfsListing();
-    markFatfsDirty(`${name} deleted. Save to persist.`);
-    appendLog(`FATFS staged deletion of ${name}.`, '[ESPConnect-Debug]');
+    markFatfsDirty(`${targetPath} deleted. Save to persist.`);
+    appendLog(`FATFS staged deletion of ${targetPath}.`, '[ESPConnect-Debug]');
   } catch (error) {
     fatfsState.error = formatErrorMessage(error);
   } finally {
     fatfsState.busy = false;
   }
+}
+
+// Recursively delete a FATFS entry and its children.
+async function removeFatfsEntry(targetPath: string) {
+  if (!fatfsState.client) {
+    return;
+  }
+  const clientPath = toFatfsClientPath(targetPath);
+  let children: LittlefsEntry[] = [];
+  try {
+    const rawEntries = fatfsState.client.list?.(clientPath) ?? [];
+    children = normalizeFatfsEntries(rawEntries, targetPath);
+  } catch {
+    children = [];
+  }
+  for (const child of children) {
+    if (child.type === 'dir') {
+      await removeFatfsEntry(child.path);
+    } else {
+      fatfsState.client.deleteFile(toFatfsClientPath(child.path));
+    }
+  }
+  fatfsState.client.deleteFile(clientPath);
+}
+
+// Navigate to a specific path within FATFS.
+async function handleFatfsNavigate(path: string) {
+  const target = normalizeFsPath(path || '/');
+  if (fatfsState.currentPath === target || !fatfsState.client) return;
+  fatfsState.currentPath = target;
+  await refreshFatfsListing();
+}
+
+// Navigate one directory up within FATFS.
+async function handleFatfsNavigateUp() {
+  const current = normalizeFsPath(fatfsState.currentPath || '/');
+  if (current === '/') return;
+  const segments = current.split('/').filter(Boolean);
+  segments.pop();
+  const parent = segments.length ? `/${segments.join('/')}` : '/';
+  await handleFatfsNavigate(parent);
+}
+
+// Create a new folder in FATFS.
+async function handleFatfsNewFolder(name?: string) {
+  if (!fatfsState.client || fatfsState.readOnly) {
+    return;
+  }
+  const folderName = (name || prompt('New folder name'))?.toString().trim();
+  if (!folderName) return;
+  if (folderName.includes('/') || folderName.includes('..')) {
+    const msg = 'Folder name cannot contain slashes or "..".';
+    showToast(msg, { color: 'warning' });
+    fatfsState.status = msg;
+    return;
+  }
+  const targetPath = joinFsPath(fatfsState.currentPath || '/', folderName);
+  const exists = (fatfsState.allFiles?.length ? fatfsState.allFiles : fatfsState.files).find(
+    entry => entry.path === targetPath && entry.type === 'dir',
+  );
+  if (exists) {
+    const msg = `Folder "${folderName}" already exists here.`;
+    showToast(msg, { color: 'warning' });
+    fatfsState.status = msg;
+    return;
+  }
+  try {
+    fatfsState.busy = true;
+    if (typeof fatfsState.client.mkdir === 'function') {
+      fatfsState.client.mkdir(toFatfsClientPath(targetPath));
+      await refreshFatfsListing();
+      markFatfsDirty(`Created folder ${targetPath}. Save to persist.`);
+    } else {
+      showToast('mkdir is not available in the FATFS client.', { color: 'error' });
+    }
+  } catch (error) {
+    fatfsState.error = formatErrorMessage(error);
+  } finally {
+    fatfsState.busy = false;
+  }
+}
+
+// Reset any upload block state for FATFS.
+function handleFatfsResetUploadBlock() {
+  fatfsState.uploadBlocked = false;
+  fatfsState.uploadBlockedReason = '';
 }
 
 // Format the FATFS image and mark changes as staged.
@@ -2266,11 +2495,11 @@ async function handleFatfsSave() {
 }
 
 // Read a FATFS file and return its raw bytes.
-async function readFatfsFile(name: string) {
+async function readFatfsFile(targetPath: string) {
   if (!fatfsState.client) {
     throw new Error('FATFS client unavailable.');
   }
-  if (!name) {
+  if (!targetPath) {
     throw new Error('File name is required.');
   }
   const reader =
@@ -2282,7 +2511,9 @@ async function readFatfsFile(name: string) {
   if (!reader) {
     throw new Error('FATFS module does not support per-file reads. Update the WASM bundle.');
   }
-  const result = reader.call(fatfsState.client, name);
+  const normalized = normalizeFsPath(targetPath || '/');
+  const clientPath = toFatfsClientPath(normalized);
+  const result = reader.call(fatfsState.client, clientPath);
   const data = result instanceof Promise ? await result : result;
   if (!(data instanceof Uint8Array)) {
     throw new Error('FATFS read returned unexpected data.');
@@ -2291,12 +2522,16 @@ async function readFatfsFile(name: string) {
 }
 
 // Download a FATFS file to the host.
-async function handleFatfsDownloadFile(name: string) {
-  if (!fatfsState.client || !name) return;
+async function handleFatfsDownloadFile(path: string) {
+  if (!fatfsState.client || !path) return;
   try {
-    const data = await readFatfsFile(name);
-    saveBinaryFile(name, data);
-    appendLog(`FATFS downloaded ${name} (${data.length.toLocaleString()} bytes).`, '[ESPConnect-Debug]');
+    const data = await readFatfsFile(path);
+    const fileName = path.split('/').filter(Boolean).pop() || 'fatfs-file';
+    saveBinaryFile(fileName, data);
+    appendLog(
+      `FATFS downloaded ${path} (${data.length.toLocaleString()} bytes).`,
+      '[ESPConnect-Debug]',
+    );
   } catch (error) {
     fatfsState.error = formatErrorMessage(error);
     fatfsState.status = 'FATFS download failed.';
@@ -2304,9 +2539,10 @@ async function handleFatfsDownloadFile(name: string) {
 }
 
 // Preview a FATFS file using the SPIFFS viewer dialog.
-async function handleFatfsView(name: string) {
+async function handleFatfsView(path: string) {
   if (!fatfsState.client) return;
-  const viewInfo = resolveSpiffsViewInfo(name);
+  const fileName = path.split('/').filter(Boolean).pop() || path;
+  const viewInfo = resolveSpiffsViewInfo(fileName);
   if (!viewInfo) {
     fatfsState.status = 'This file type cannot be previewed. Download it instead.';
     showToast(fatfsState.status, { color: 'info' });
@@ -2314,14 +2550,14 @@ async function handleFatfsView(name: string) {
   }
   resetViewerMedia();
   spiffsViewerDialog.visible = true;
-  spiffsViewerDialog.name = name;
+  spiffsViewerDialog.name = path;
   spiffsViewerDialog.loading = true;
   spiffsViewerDialog.error = null;
   spiffsViewerDialog.content = '';
   spiffsViewerDialog.mode = viewInfo.mode;
   spiffsViewerDialog.source = 'fatfs';
   try {
-    const data = await readFatfsFile(name);
+    const data = await readFatfsFile(path);
     if (data.length > SPIFFS_VIEWER_MAX_BYTES) {
       throw new Error(
         `File too large to preview (limit ${formatBytes(SPIFFS_VIEWER_MAX_BYTES) ?? SPIFFS_VIEWER_MAX_BYTES} bytes).`,
@@ -2601,6 +2837,8 @@ function resetFatfsState() {
   fatfsState.lastReadImage = null;
   fatfsState.client = null;
   fatfsState.files = [];
+  fatfsState.allFiles = [];
+  fatfsState.currentPath = '/';
   fatfsState.status = 'Load a FATFS partition to begin.';
   fatfsState.loading = false;
   fatfsState.busy = false;
@@ -2634,10 +2872,15 @@ function resetNvsState() {
 
 // Calculate FATFS usage based on current entries.
 function updateFatfsUsage(partition = fatfsSelectedPartition.value) {
+  if (fatfsState.client && typeof fatfsState.client.getUsage === 'function') {
+    fatfsState.usage = fatfsState.client.getUsage();
+    return;
+  }
   const partitionSize = partition?.size ?? fatfsState.blockSize * fatfsState.blockCount;
   const capacityBytes =
     fatfsState.blockSize && fatfsState.blockCount ? fatfsState.blockSize * fatfsState.blockCount : partitionSize;
-  const usedBytes = fatfsState.files.reduce((sum, file) => sum + (file.size ?? 0), 0);
+  const source = fatfsState.allFiles?.length ? fatfsState.allFiles : fatfsState.files;
+  const usedBytes = source.reduce((sum, file) => sum + (file.size ?? 0), 0);
   fatfsState.usage = {
     capacityBytes,
     usedBytes,
@@ -3471,10 +3714,11 @@ type CancelDownloadOptions = {
 // Write a filesystem image to flash with progress callbacks.
 async function writeFilesystemImage(partition: any, image: Uint8Array, options: WriteFilesystemOptions = {}) {
   const { onProgress, label = 'filesystem', state, compress = true } = options;
-  if (!loader.value) {
+  const loaderInstance = loader.value;
+  if (!loaderInstance) {
     throw new Error('Loader unavailable.');
   }
-  await loader.value.flashData(
+  await runLoaderOperation(() => loaderInstance.flashData(
     toArrayBuffer(image),
     (written, total) => {
       const progressValue = total ? Math.min(100, Math.floor((written / total) * 100)) : 0;
@@ -3491,7 +3735,7 @@ async function writeFilesystemImage(partition: any, image: Uint8Array, options: 
     },
     partition.offset,
     compress
-  );
+  ));
   const finishingLabel = `Finalizing ${label}...`;
   if (state) {
     state.status = finishingLabel;
@@ -3511,7 +3755,8 @@ const FLASH_READ_MIN_CHUNK = 0x1000;
 
 // Read a region of flash into a buffer with chunked progress reporting.
 async function readFlashToBuffer(offset: number, length: number, options: ReadFlashOptions = {}) {
-  if (!loader.value) {
+  const loaderInstance = loader.value;
+  if (!loaderInstance) {
     throw new Error('Device not connected.');
   }
   if (!Number.isSafeInteger(offset) || offset < 0) {
@@ -3522,54 +3767,56 @@ async function readFlashToBuffer(offset: number, length: number, options: ReadFl
   }
   const cancelSignal = options.cancelSignal;
   const label = options.label || 'filesystem';
-  const chunkBuffers = [];
-  const chunkSize = Math.max(FLASH_READ_MIN_CHUNK, Math.min(FLASH_READ_MAX_CHUNK, length));
-  let totalReceived = 0;
-  while (totalReceived < length) {
+  return await runLoaderOperation(async () => {
+    const chunkBuffers = [];
+    const chunkSize = Math.max(FLASH_READ_MIN_CHUNK, Math.min(FLASH_READ_MAX_CHUNK, length));
+    let totalReceived = 0;
+    while (totalReceived < length) {
+      if (cancelSignal?.value) {
+        throw new Error(FILESYSTEM_LOAD_CANCELLED_MESSAGE);
+      }
+      const remaining = length - totalReceived;
+      const currentChunkSize = Math.min(chunkSize, remaining);
+      const chunkOffset = offset + totalReceived;
+      const chunkBase = totalReceived;
+      const chunk = await loaderInstance.readFlash(
+        chunkOffset,
+        currentChunkSize,
+        (_packet, received) => {
+          const chunkReceived = Math.min(received, currentChunkSize);
+          const overallReceived = chunkBase + chunkReceived;
+          const progressValue = length ? Math.min(100, Math.floor((overallReceived / length) * 100)) : 0;
+          let progressLabel = `Reading ${label} - ${overallReceived.toLocaleString()} of ${length.toLocaleString()} bytes`;
+          if (cancelSignal?.value) {
+            progressLabel = `Stopping read of ${label} after current chunk... (${overallReceived.toLocaleString()} of ${length.toLocaleString()} bytes)`;
+          }
+          if (typeof options.onProgress === 'function') {
+            options.onProgress({
+              value: progressValue,
+              label: progressLabel,
+              written: overallReceived,
+              total: length,
+            });
+          }
+        }
+      );
+      chunkBuffers.push(chunk);
+      totalReceived += chunk.length;
+    }
     if (cancelSignal?.value) {
       throw new Error(FILESYSTEM_LOAD_CANCELLED_MESSAGE);
     }
-    const remaining = length - totalReceived;
-    const currentChunkSize = Math.min(chunkSize, remaining);
-    const chunkOffset = offset + totalReceived;
-    const chunkBase = totalReceived;
-    const chunk = await loader.value.readFlash(
-      chunkOffset,
-      currentChunkSize,
-      (_packet, received) => {
-        const chunkReceived = Math.min(received, currentChunkSize);
-        const overallReceived = chunkBase + chunkReceived;
-        const progressValue = length ? Math.min(100, Math.floor((overallReceived / length) * 100)) : 0;
-        let progressLabel = `Reading ${label} - ${overallReceived.toLocaleString()} of ${length.toLocaleString()} bytes`;
-        if (cancelSignal?.value) {
-          progressLabel = `Stopping read of ${label} after current chunk... (${overallReceived.toLocaleString()} of ${length.toLocaleString()} bytes)`;
-        }
-        if (typeof options.onProgress === 'function') {
-          options.onProgress({
-            value: progressValue,
-            label: progressLabel,
-            written: overallReceived,
-            total: length,
-          });
-        }
-      }
-    );
-    chunkBuffers.push(chunk);
-    totalReceived += chunk.length;
-  }
-  if (cancelSignal?.value) {
-    throw new Error(FILESYSTEM_LOAD_CANCELLED_MESSAGE);
-  }
-  if (chunkBuffers.length === 1) {
-    return chunkBuffers[0];
-  }
-  const buffer = new Uint8Array(totalReceived);
-  let writeOffset = 0;
-  for (const chunk of chunkBuffers) {
-    buffer.set(chunk, writeOffset);
-    writeOffset += chunk.length;
-  }
-  return buffer;
+    if (chunkBuffers.length === 1) {
+      return chunkBuffers[0];
+    }
+    const buffer = new Uint8Array(totalReceived);
+    let writeOffset = 0;
+    for (const chunk of chunkBuffers) {
+      buffer.set(chunk, writeOffset);
+      writeOffset += chunk.length;
+    }
+    return buffer;
+  });
 }
 
 // Map chip package codes to human-friendly labels.
@@ -3690,7 +3937,11 @@ function resolveEmbeddedPsram(
   return null;
 }
 
-const serialSupported = 'serial' in navigator;
+const isE2E =
+  import.meta.env.VITE_E2E === '1' ||
+  import.meta.env.VITE_E2E === 'true' ||
+  (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('e2e'));
+const serialSupported = isE2E || 'serial' in navigator;
 const { t } = useI18n();
 const connected = ref(false);
 const busy = ref(false);
@@ -3740,6 +3991,7 @@ const {
   fatfsSaveDialog,
   fatfsRestoreDialog,
 } = useFatfsManager(FATFS_DEFAULT_BLOCK_SIZE);
+let fatfsUploadQueue = Promise.resolve();
 const nvsState = reactive<{
   selectedId: number | null;
   status: string;
@@ -3865,6 +4117,10 @@ const littlefsVisibleFiles = computed(() => {
   const base = normalizeFsPath(littlefsState.currentPath || '/');
   return littlefsState.files.filter(entry => isDirectChildPath(entry.path, base));
 });
+const fatfsVisibleFiles = computed(() => {
+  const base = normalizeFsPath(fatfsState.currentPath || '/');
+  return fatfsState.files.filter(entry => isDirectChildPath(entry.path, base));
+});
 const fatfsPartitions = computed(() =>
   partitionTable.value
     .filter(entry => {
@@ -3898,6 +4154,7 @@ const logBuffer = ref('');
 const monitorText = ref<string>('');
 const monitorActive = ref<boolean>(false);
 const monitorError = ref<SerialMonitorError>(null);
+const monitorStarting = ref<boolean>(false);
 const monitorAbortController = ref<AbortController | null>(null);
 const serialMonitorClosedPrompt = ref(false);
 const maintenanceReturnInProgress = ref(false);
@@ -3906,7 +4163,7 @@ const maintenanceNavigationLocked = computed(
 );
 const MONITOR_BUFFER_LIMIT = 20000;
 let monitorPendingText = '';
-let monitorFlushHandle: number | null = null;
+let monitorFlushHandle: ReturnType<typeof setTimeout> | number | null = null;
 let monitorFlushUsingAnimationFrame = false;
 const confirmationDialog = reactive({
   visible: false,
@@ -3919,8 +4176,15 @@ const confirmationDialog = reactive({
 let confirmationResolver: ((confirmed: boolean) => void) | null = null;
 const currentPort = ref<SerialPort | null>(null);
 const transport = shallowRef<CompatibleTransport | null>(null);
-const loader = shallowRef<CompatibleLoader | null>(null);
+const loader = shallowRef<ESPLoader | null>(null);
 const esptoolClient = shallowRef<EsptoolClient | null>(null);
+async function runLoaderOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const client = esptoolClient.value;
+  if (client?.runWithBusy) {
+    return await client.runWithBusy(operation);
+  }
+  return await operation();
+}
 const firmwareBuffer = ref<ArrayBuffer | null>(null);
 const firmwareName = ref('');
 const chipDetails = ref<DeviceDetails | null>(null);
@@ -4088,14 +4352,16 @@ async function setConnectionBaud(targetBaud: string | number, options: SetBaudOp
   }
 
   if (connected.value && loader.value) {
+    const loaderInstance = loader.value;
     try {
       baudChangeBusy.value = true;
       if (log) {
         appendLog('Changing baud to ' + parsed.toLocaleString() + ' bps...', '[ESPConnect-Debug]');
       }
-      loader.value.baudrate = parsed;
-      await loader.value.setBaudrate(parsed);
-      await loader.value.sleep(300); // Fix needed for Native USB (0x1001), otherwise an error is raised 
+      await runLoaderOperation(async () => {
+        await loaderInstance.setBaudrate(parsed);
+        await loaderInstance.sleep(300); // Fix needed for Native USB (0x1001), otherwise an error is raised
+      });
       if (transport.value) {
         transport.value.baudrate = parsed;
       }
@@ -4388,7 +4654,7 @@ function detectActiveOtaSlot(otadata: Uint8Array, otaEntries: PartitionTableEntr
 }
 
 // Scan application partitions to build metadata and identify the active slot.
-async function analyzeAppPartitions(loaderInstance: CompatibleLoader, partitions: PartitionTableEntry[]) {
+async function analyzeAppPartitions(loaderInstance: ESPLoader, partitions: PartitionTableEntry[]) {
   appPartitions.value = [];
   activeAppSlotId.value = null;
   appMetadataError.value = null;
@@ -4595,7 +4861,7 @@ async function loadAppMetadata(options: LoadAppMetadataOptions = {}) {
   appMetadataError.value = null;
   appMetadataLoaded.value = false;
   try {
-    await analyzeAppPartitions(loaderInstance, partitions);
+    await runLoaderOperation(() => analyzeAppPartitions(loaderInstance, partitions));
   } catch (error) {
     appendLog('Failed to analyze app partitions', error);
     appMetadataError.value = formatErrorMessage(error);
@@ -5180,6 +5446,10 @@ const connectionChipLabel = computed(() => {
     return t('status.disconnected');
   }
 
+  if (isE2E) {
+    return t('status.connected');
+  }
+
   const name = chipDetails.value?.name?.trim();
   return name || t('status.connected');
 });
@@ -5259,7 +5529,7 @@ function cancelMonitorFlush() {
     return;
   }
   if (monitorFlushUsingAnimationFrame && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
-    window.cancelAnimationFrame(monitorFlushHandle);
+    window.cancelAnimationFrame(monitorFlushHandle as number);
   } else {
     clearTimeout(monitorFlushHandle);
   }
@@ -5416,13 +5686,22 @@ async function monitorLoop(signal: AbortSignal) {
 
 // Kick off the serial monitor and adjust baud if needed.
 async function startMonitor() {
-  if (!canStartMonitor.value || monitorActive.value) {
+  if (!canStartMonitor.value || monitorActive.value || monitorStarting.value) {
     return;
   }
   if (!transport.value) {
     appendLog('Monitor unavailable: transport not ready.', '[ESPConnect-Warn]');
     return;
   }
+  monitorStarting.value = true;
+  try {
+    await startMonitorFlow();
+  } finally {
+    monitorStarting.value = false;
+  }
+}
+
+async function startMonitorFlow() {
   previousMonitorBaud.value = currentBaud.value || lastFlashBaud.value || DEFAULT_FLASH_BAUD;
   if (currentBaud.value !== MONITOR_BAUD) {
     try {
@@ -5515,22 +5794,25 @@ async function stopMonitor(options: StopMonitorOptions = {}) {
     return;
   }
 
-  if (!connected.value || !loader.value) {
+  const loaderInstance = loader.value;
+  if (!connected.value || !loaderInstance) {
     return;
   }
 
   busy.value = true;
   maintenanceReturnInProgress.value = true;
   appendLog('Returning to maintenance mode.', '[ESPConnect-ui]');
-  connectDialog.label = 'Returning to maintenance mode...';
-  connectDialog.message = 'Re-entering ROM bootloader...';
+  connectDialog.label = t('dialogs.returningToMaintenance');
+  connectDialog.message = t('dialogs.reEnteringBootloader');
   connectDialog.visible = true;
   try {
-    await loader.value.reconnect();
+    await runLoaderOperation(() => loaderInstance.reconnect());
     monitorAutoResetPerformed = false;
 
     if (lastFlashBaud.value) {
-      connectDialog.message = `Restoring baud to ${lastFlashBaud.value.toLocaleString()} bps...`;
+      connectDialog.message = t('dialogs.restoringBaud', {
+        baud: lastFlashBaud.value.toLocaleString(),
+      });
       await setConnectionBaud(lastFlashBaud.value, { remember: true, log: true });
     }
   } catch (error) {
@@ -5568,7 +5850,7 @@ async function enterUserFirmware() {
   }
   try {
     appendLog('Board Hard Reset', '[ESPConnect-Debug]');
-    await currentLoader.hardReset(false);
+    await runLoaderOperation(() => currentLoader.hardReset(false));
   } catch (err) {
     appendLog(`Board reset failed: ${formatErrorMessage(err)}`, '[error]');
   }
@@ -5634,8 +5916,8 @@ async function connect() {
   serialMonitorClosedPrompt.value = false;
   resetMaintenanceState();
   connectDialog.visible = false;
-  connectDialog.label = 'Connecting to ESP device...';
-  connectDialog.message = 'Opening serial port...';
+  connectDialog.label = t('dialogs.connectingToDevice');
+  connectDialog.message = t('dialogs.openingSerialPort');
   if (connectDialogTimer) {
     clearTimeout(connectDialogTimer);
     connectDialogTimer = null;
@@ -5692,9 +5974,22 @@ async function connect() {
       desiredBaud,
       debugSerial: false,
       debugLogging: false,
-      onStatus: msg => {
-        connectDialog.message = msg;
-        appendLog(msg, '[ESPConnect-Debug]');
+      onStatus: (payload: StatusPayload) => {
+        if (!payload) {
+          return;
+        }
+        const dialogText =
+          payload.translationKey != null
+            ? t(payload.translationKey, payload.params ?? {})
+            : payload.message ?? '';
+        const sessionLogMessage = payload.message ?? '';
+        if (sessionLogMessage) {
+          appendLog(sessionLogMessage, '[ESPConnect-Debug]');
+        }
+        const showInDialog = payload.showInDialog ?? true;
+        if (showInDialog && dialogText) {
+          connectDialog.message = dialogText;
+        }
       },
     });
     esptoolClient.value = esptool;
@@ -5714,7 +6009,7 @@ async function connect() {
     }
 
     // Open the serial port, talk to the ROM bootloader, load the stub flasher
-    connectDialog.message = 'Handshaking with ROM bootloader...';
+    connectDialog.message = t('dialogs.handshakingBootloader');
     const esp = await client.connectAndHandshake();
     currentBaud.value = desiredBaud || connectBaud_defaultROM;
     transportInstance.baudrate = currentBaud.value;
@@ -5735,7 +6030,7 @@ async function connect() {
     const featuresRaw = metadata.features;
     const crystalFreq = metadata.crystalFreq;
 
-    connectDialog.message = `Reading Flash size...`;
+    connectDialog.message = t('dialogs.readingFlashSize');
     const flashLabel = esp.flashSize;
     appendLog(
       `Chip detectFlashSize: ${flashLabel === null ? 'undefined' : flashLabel}`,
@@ -5745,7 +6040,7 @@ async function connect() {
     let flashId: number | null = null;
     let id: number | null = null;
     try {
-      const detectedFlashId = await client.loader.flashId();
+      const detectedFlashId = await runLoaderOperation(() => client.loader.flashId());
       flashId = detectedFlashId;
       id = Number.isFinite(detectedFlashId) ? detectedFlashId : null;
     } catch (error) {
@@ -5773,7 +6068,7 @@ async function connect() {
       '[ESPConnect-Debug]'
     );
 
-    connectDialog.message = `Preparing information...`;
+    connectDialog.message = t('dialogs.preparingInformation');
     const featureList: string[] = Array.isArray(featuresRaw)
       ? (featuresRaw as string[])
       : typeof featuresRaw === 'string'
@@ -5903,14 +6198,18 @@ async function connect() {
       appendLog(`Warning: failed to flush serial input before partition read (${formatErrorMessage(err)}).`, '[ESPConnect-Warn]');
     }
 
-    connectDialog.message = `Reading partition table...`;
+    connectDialog.message = t('dialogs.readingPartitionTable');
     if (esp.chipName?.includes('ESP8266')) {
       appendLog('Skipping partition table read for ESP8266 (not supported).', '[ESPConnect-Debug]');
       partitionTable.value = [];
       appMetadataLoaded.value = false;
-    } else {
-      const partitions = await readPartitionTable(loader.value, undefined, undefined, appendLog);
+    } else if (loader.value) {
+      const loaderInstance = loader.value;
+      const partitions = await runLoaderOperation(() => readPartitionTable(loaderInstance, undefined, undefined, appendLog));
       partitionTable.value = partitions;
+      appMetadataLoaded.value = false;
+    } else {
+      partitionTable.value = [];
       appMetadataLoaded.value = false;
     }
 
@@ -6041,7 +6340,8 @@ function parseNumericInput(value: string | number | null | undefined, label: str
 
 // Flash the selected firmware image to the device.
 async function flashFirmware() {
-  if (!loader.value || !firmwareBuffer.value) {
+  const loaderInstance = loader.value;
+  if (!loaderInstance || !firmwareBuffer.value) {
     appendLog('Select a firmware binary and connect to a device first.', '[ESPConnect-Warn]');
     return;
   }
@@ -6091,31 +6391,34 @@ async function flashFirmware() {
     const bytes = new Uint8Array(firmwareBuffer.value);
     const startTime = performance.now();
 
-    if (eraseFlash.value && typeof loader.value.eraseFlash === 'function') {
-      flashProgressDialog.label = `Erasing flash @ ${flashBaudLabel}...`;
-      await loader.value.eraseFlash();
-    }
+    await runLoaderOperation(async () => {
+      const eraseFlashFn = (loaderInstance as ESPLoader & { eraseFlash?: () => Promise<void> }).eraseFlash;
+      if (eraseFlash.value && typeof eraseFlashFn === 'function') {
+        flashProgressDialog.label = `Erasing flash @ ${flashBaudLabel}...`;
+        await eraseFlashFn.call(loaderInstance);
+      }
 
-    await loader.value.flashData(
-      bytes.buffer,
-      (written, total) => {
-        if (flashCancelRequested.value) {
-          throw new Error('Flash cancelled by user');
-        }
-        const pct = total ? Math.floor((written / total) * 100) : 0;
-        const clamped = Math.min(100, Math.max(0, pct));
-        flashProgress.value = clamped;
-        flashProgressDialog.visible = true;
-        flashProgressDialog.value = clamped;
-        const writtenLabel = written.toLocaleString();
-        const totalLabel = total ? total.toLocaleString() : '';
-        flashProgressDialog.label = total
-          ? `Flashing ${firmwareLabel} - ${writtenLabel} of ${totalLabel} bytes @ ${flashBaudLabel}`
-          : `Flashing ${firmwareLabel} - ${writtenLabel} bytes @ ${flashBaudLabel}`;
-      },
-      offsetNumber,
-      true
-    );
+      await loaderInstance.flashData(
+        bytes.buffer,
+        (written, total) => {
+          if (flashCancelRequested.value) {
+            throw new Error('Flash cancelled by user');
+          }
+          const pct = total ? Math.floor((written / total) * 100) : 0;
+          const clamped = Math.min(100, Math.max(0, pct));
+          flashProgress.value = clamped;
+          flashProgressDialog.visible = true;
+          flashProgressDialog.value = clamped;
+          const writtenLabel = written.toLocaleString();
+          const totalLabel = total ? total.toLocaleString() : '';
+          flashProgressDialog.label = total
+            ? `Flashing ${firmwareLabel} - ${writtenLabel} of ${totalLabel} bytes @ ${flashBaudLabel}`
+            : `Flashing ${firmwareLabel} - ${writtenLabel} bytes @ ${flashBaudLabel}`;
+        },
+        offsetNumber,
+        true
+      );
+    });
     flashProgressDialog.value = 100;
     flashProgressDialog.label = 'Finalizing Flash...'
     await esptoolClient.value?.syncWithStub();
@@ -6194,7 +6497,8 @@ function handleSelectRegister(address: string) {
 
 // Read a register value via the loader.
 async function handleReadRegister() {
-  if (!loader.value) {
+  const loaderInstance = loader.value;
+  if (!loaderInstance) {
     registerStatus.value = 'Connect to a device first.';
     registerStatusType.value = 'warning';
     return;
@@ -6203,7 +6507,7 @@ async function handleReadRegister() {
     maintenanceBusy.value = true;
     registerStatus.value = null;
     const address = parseNumericInput(registerAddress.value, 'Register address');
-    const value = await loader.value.readReg(address);
+    const value = await runLoaderOperation(() => loaderInstance.readRegister(address));
     registerReadResult.value = `0x${value.toString(16).toUpperCase().padStart(8, '0')}`;
     registerStatusType.value = 'success';
     registerStatus.value = `Read 0x${address.toString(16).toUpperCase()} = ${registerReadResult.value}`;
@@ -6218,7 +6522,8 @@ async function handleReadRegister() {
 
 // Write a value to the selected register via the loader.
 async function handleWriteRegister() {
-  if (!loader.value) {
+  const loaderInstance = loader.value;
+  if (!loaderInstance) {
     registerStatus.value = 'Connect to a device first.';
     registerStatusType.value = 'warning';
     return;
@@ -6228,7 +6533,7 @@ async function handleWriteRegister() {
     registerStatus.value = null;
     const address = parseNumericInput(registerAddress.value, 'Register address');
     const value = parseNumericInput(registerValue.value, 'Register value');
-    await loader.value.writeReg(address, value);
+    await runLoaderOperation(() => loaderInstance.writeRegister(address, value));
     registerReadResult.value = `0x${value.toString(16).toUpperCase().padStart(8, '0')}`;
     registerStatusType.value = 'success';
     registerStatus.value = `Wrote ${registerReadResult.value} to 0x${address
@@ -6265,9 +6570,14 @@ async function handleComputeMd5() {
     }
     md5StatusType.value = 'info';
     md5Status.value = 'Calculating MD5 checksum...';
-    const result = await loader.value.flashMd5sum(offset, length);
+    const client = esptoolClient.value;
+    if (!client) {
+      throw new Error('ESPLoader client not available.');
+    }
+    const result = await client.flashMd5sum(offset, length);
     md5Status.value = null;
     md5Result.value = result;
+    showToast('MD5 checksum computed.', { color: 'success' });
     appendLog(
       `Computed MD5 for 0x${offset.toString(16).toUpperCase()} (${length} bytes): ${result}`,
       '[ESPConnect-Debug]'
@@ -6303,7 +6613,8 @@ function formatBackupTimestamp(date = new Date()) {
 
 // Read a flash region and trigger a download with optional progress handling.
 async function downloadFlashRegion(offset: number, length: number, options: DownloadFlashOptions = {}) {
-  if (!loader.value) {
+  const loaderInstance = loader.value;
+  if (!loaderInstance) {
     throw new Error('Device not connected.');
   }
   if (!Number.isSafeInteger(offset) || offset < 0) {
@@ -6341,157 +6652,159 @@ async function downloadFlashRegion(offset: number, length: number, options: Down
 
   downloadCancelRequested.value = false;
 
-  const chunkBuffers = [];
+  const chunkBuffers: Uint8Array[] = [];
   const chunkSize = Math.max(0x1000, Math.min(MAX_CHUNK_SIZE, length));
   let totalReceived = 0;
   let buffer = null;
   let cancelled = false;
-  try {
-    while (totalReceived < length) {
-      if (downloadCancelRequested.value) {
-        cancelled = true;
-        break;
-      }
-      const remaining = length - totalReceived;
-      const currentChunkSize = Math.min(chunkSize, remaining);
-      const chunkOffset = offset + totalReceived;
-      const chunkBase = totalReceived;
-      const chunkBuffer = await loader.value.readFlash(
-        chunkOffset,
-        currentChunkSize,
-        (_packet, received) => {
-          const chunkReceived = Math.min(received, currentChunkSize);
-          const overallReceived = chunkBase + chunkReceived;
-          const progressValue = length
-            ? Math.min(100, Math.floor((overallReceived / length) * 100))
-            : 0;
-          let progressLabel =
-            'Downloading ' +
-            displayLabel +
-            ' @ ' +
-            baudLabel +
-            ' — ' +
-            overallReceived.toLocaleString() +
-            ' of ' +
-            length.toLocaleString() +
-            ' bytes';
-          if (downloadCancelRequested.value) {
-            progressLabel =
-              'Stopping download of ' +
+  return await runLoaderOperation(async () => {
+    try {
+      while (totalReceived < length) {
+        if (downloadCancelRequested.value) {
+          cancelled = true;
+          break;
+        }
+        const remaining = length - totalReceived;
+        const currentChunkSize = Math.min(chunkSize, remaining);
+        const chunkOffset = offset + totalReceived;
+        const chunkBase = totalReceived;
+        const chunkBuffer = await loaderInstance.readFlash(
+          chunkOffset,
+          currentChunkSize,
+          (_packet, received) => {
+            const chunkReceived = Math.min(received, currentChunkSize);
+            const overallReceived = chunkBase + chunkReceived;
+            const progressValue = length
+              ? Math.min(100, Math.floor((overallReceived / length) * 100))
+              : 0;
+            let progressLabel =
+              'Downloading ' +
               displayLabel +
-              ' after current chunk... (' +
+              ' @ ' +
+              baudLabel +
+              ' - ' +
               overallReceived.toLocaleString() +
               ' of ' +
               length.toLocaleString() +
-              ' bytes)';
+              ' bytes';
+            if (downloadCancelRequested.value) {
+              progressLabel =
+                'Stopping download of ' +
+                displayLabel +
+                ' after current chunk... (' +
+                overallReceived.toLocaleString() +
+                ' of ' +
+                length.toLocaleString() +
+                ' bytes)';
+            }
+            if (!suppressStatus) {
+              downloadProgress.visible = true;
+              downloadProgress.value = progressValue;
+              downloadProgress.label = progressLabel;
+              flashReadStatusType.value = 'info';
+              flashReadStatus.value = progressLabel;
+            }
+            if (typeof onProgress === 'function') {
+              onProgress({
+                value: progressValue,
+                label: progressLabel,
+                written: overallReceived,
+                total: length,
+              });
+            }
           }
-          if (!suppressStatus) {
-            downloadProgress.visible = true;
-            downloadProgress.value = progressValue;
-            downloadProgress.label = progressLabel;
-            flashReadStatusType.value = 'info';
-            flashReadStatus.value = progressLabel;
-          }
-          if (typeof onProgress === 'function') {
-            onProgress({
-              value: progressValue,
-              label: progressLabel,
-              written: overallReceived,
-              total: length,
-            });
-          }
+        );
+        if (chunkBuffer.length !== currentChunkSize) {
+          throw new Error(
+            'Incomplete flash chunk (expected ' +
+            currentChunkSize +
+            ' bytes, received ' +
+            chunkBuffer.length +
+            ').'
+          );
         }
-      );
-      if (chunkBuffer.length !== currentChunkSize) {
+        chunkBuffers.push(chunkBuffer);
+        totalReceived += chunkBuffer.length;
+        if (downloadCancelRequested.value) {
+          cancelled = true;
+          break;
+        }
+      }
+
+      if (cancelled) {
+        throw new Error(CANCEL_ERROR_MESSAGE);
+      }
+
+      if (totalReceived !== length) {
         throw new Error(
-          'Incomplete flash chunk (expected ' +
-          currentChunkSize +
+          'Incomplete flash read (expected ' +
+          length +
           ' bytes, received ' +
-          chunkBuffer.length +
+          totalReceived +
           ').'
         );
       }
-      chunkBuffers.push(chunkBuffer);
-      totalReceived += chunkBuffer.length;
-      if (downloadCancelRequested.value) {
-        cancelled = true;
-        break;
+
+      if (chunkBuffers.length === 1) {
+        buffer = chunkBuffers[0];
+      } else {
+        buffer = new Uint8Array(totalReceived);
+        let writeOffset = 0;
+        for (const chunk of chunkBuffers) {
+          buffer.set(chunk, writeOffset);
+          writeOffset += chunk.length;
+        }
       }
-    }
-
-    if (cancelled) {
-      throw new Error(CANCEL_ERROR_MESSAGE);
-    }
-
-    if (totalReceived !== length) {
-      throw new Error(
-        'Incomplete flash read (expected ' +
-        length +
-        ' bytes, received ' +
-        totalReceived +
-        ').'
-      );
-    }
-
-    if (chunkBuffers.length === 1) {
-      buffer = chunkBuffers[0];
-    } else {
-      buffer = new Uint8Array(totalReceived);
-      let writeOffset = 0;
-      for (const chunk of chunkBuffers) {
-        buffer.set(chunk, writeOffset);
-        writeOffset += chunk.length;
+    } finally {
+      if (cancelled && !suppressStatus) {
+        downloadProgress.visible = false;
       }
+      downloadCancelRequested.value = false;
     }
-  } finally {
-    if (cancelled && !suppressStatus) {
+
+    const blob = new Blob([toArrayBuffer(buffer)], { type: 'application/octet-stream' });
+    const baseName =
+      fileName ||
+      sanitizeFileName((label || 'flash') + '_' + offsetHex + '_' + lengthHex, 'flash_' + offsetHex + '_' + lengthHex);
+    const finalName = baseName.endsWith('.bin') ? baseName : baseName + '.bin';
+
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = finalName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    if (!suppressStatus) {
       downloadProgress.visible = false;
+      downloadProgress.value = 100;
+      downloadProgress.label = 'Download complete @ ' + baudLabel;
+      flashReadStatusType.value = 'success';
+      flashReadStatus.value =
+        'Downloaded ' +
+        finalName +
+        ' (' +
+        length.toLocaleString() +
+        ' bytes) @ ' +
+        baudLabel +
+        '.';
     }
-    downloadCancelRequested.value = false;
-  }
-
-  const blob = new Blob([toArrayBuffer(buffer)], { type: 'application/octet-stream' });
-  const baseName =
-    fileName ||
-    sanitizeFileName((label || 'flash') + '_' + offsetHex + '_' + lengthHex, 'flash_' + offsetHex + '_' + lengthHex);
-  const finalName = baseName.endsWith('.bin') ? baseName : baseName + '.bin';
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = finalName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-  if (!suppressStatus) {
-    downloadProgress.visible = false;
-    downloadProgress.value = 100;
-    downloadProgress.label = 'Download complete @ ' + baudLabel;
-    flashReadStatusType.value = 'success';
-    flashReadStatus.value =
-      'Downloaded ' +
-      finalName +
-      ' (' +
-      length.toLocaleString() +
-      ' bytes) @ ' +
-      baudLabel +
-      '.';
-  }
-  if (typeof onProgress === 'function') {
-    onProgress({
-      value: 100,
-      label: 'Download complete.',
-      written: length,
-      total: length,
-    });
-  }
-  appendLog(
-    'Downloaded ' + displayLabel + ' to ' + finalName + ' @ ' + baudLabel + '.',
-    '[ESPConnect-Debug]'
-  );
-  return finalName;
+    if (typeof onProgress === 'function') {
+      onProgress({
+        value: 100,
+        label: 'Download complete.',
+        written: length,
+        total: length,
+      });
+    }
+    appendLog(
+      'Downloaded ' + displayLabel + ' to ' + finalName + ' @ ' + baudLabel + '.',
+      '[ESPConnect-Debug]'
+    );
+    return finalName;
+  });
 }
 
 // Handle flash download flows (manual, partition, all, used, custom).
@@ -6730,7 +7043,8 @@ async function handleEraseFlash(payload = { mode: 'full' }) {
     flashReadStatusType.value = 'warning';
     return;
   }
-  if (!loaderInstance.eraseFlash) {
+  const eraseFlashFn = (loaderInstance as ESPLoader & { eraseFlash?: () => Promise<void> }).eraseFlash;
+  if (!eraseFlashFn) {
     flashReadStatusType.value = 'warning';
     flashReadStatus.value = 'Full flash erase is not supported by this loader.';
     return;
@@ -6759,7 +7073,7 @@ async function handleEraseFlash(payload = { mode: 'full' }) {
     maintenanceBusy.value = true;
     flashReadStatusType.value = 'info';
     flashReadStatus.value = 'Erasing entire flash...';
-    await loaderInstance.eraseFlash();
+    await runLoaderOperation(() => eraseFlashFn.call(loaderInstance));
     flashReadStatusType.value = 'success';
     flashReadStatus.value = 'Flash erase complete.';
     appendLog('Entire flash erased.', '[ESPConnect-Debug]');

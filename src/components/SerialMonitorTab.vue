@@ -25,7 +25,8 @@
             variant="tonal"
             size="small"
             prepend-icon="mdi-play-circle"
-            :disabled="monitorActive || !canStart"
+            :disabled="monitorActive || !canStart || monitorStarting"
+            :loading="monitorStarting"
             @click="emit('start-monitor')"
           >
             {{ t('serialMonitor.actions.start') }}
@@ -131,6 +132,7 @@ const props = withDefaults(defineProps<SerialMonitorTabProps>(), {
   monitorError: null,
   canStart: false,
   canCommand: false,
+  monitorStarting: false,
 });
 
   const emit = defineEmits<SerialMonitorTabEmits>();
@@ -170,8 +172,9 @@ function togglePause(): void {
 
 const sourceText = computed(() => (paused.value ? pausedSnapshot.value : props.monitorText));
 const displayText = computed(() => {
-  if (!filterText.value.trim()) return sourceText.value;
-  const needle = filterText.value.toLowerCase();
+  const filterValue = (filterText.value ?? '').trim();
+  if (!filterValue) return sourceText.value;
+  const needle = filterValue.toLowerCase();
   return sourceText.value
     .split(/\r?\n/)
     .filter(line => line.toLowerCase().includes(needle))
