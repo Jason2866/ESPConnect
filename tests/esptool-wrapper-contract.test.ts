@@ -95,6 +95,22 @@ describe("tasmota-webserial-esptool wrapper contract", () => {
     await port.close();
   });
 
+  it("connectAndHandshake completes with stub upload transcript", async () => {
+    const { client, port } = createClient("handshake-stub-s3", {
+      desiredBaud: 921600,
+    });
+
+    const result = await client.connectAndHandshake();
+
+    expect(result).toMatchObject({
+      chipName: "ESP32-S3",
+      macAddress: "34:85:18:95:6b:4c",
+    });
+
+    port.assertNoPendingSteps();
+    await port.close();
+  });
+
   it("syncWithStub reports reconnecting status and completes", async () => {
     const { client, port, statuses } = createClient("handshake-reconnect", {
       desiredBaud: 921600,
