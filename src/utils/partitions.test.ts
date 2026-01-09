@@ -7,7 +7,7 @@ import { detectFilesystemType, readPartitionTable } from './partitions';
 const textEncoder = new TextEncoder();
 const FIXTURE_ROOT = path.resolve(process.cwd(), 'src/tests/fixtures/fs-images');
 const FAT_FIXTURE = new Uint8Array(readFileSync(path.join(FIXTURE_ROOT, 'fat', 'fat.bin')));
-const MICROPY_FIXTURE = new Uint8Array(readFileSync(path.join(FIXTURE_ROOT, 'fat', 'fat-micropython1-25.bin')));
+const MICROPY_FIXTURE = new Uint8Array(readFileSync(path.join(FIXTURE_ROOT, 'littlefs', 'littlefs-micropython1-25.bin')));
 const SPIFFS_FIXTURE = new Uint8Array(readFileSync(path.join(FIXTURE_ROOT, 'spiffs', 'spiffs.bin')));
 
 function makeFixtureLoader(image: Uint8Array) {

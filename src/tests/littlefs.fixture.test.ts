@@ -6,10 +6,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 type LittleFSModule = typeof import('../wasm/littlefs/index.js');
 
 const FIXTURE_PATH = path.resolve(process.cwd(), 'src/tests/fixtures/fs-images/littlefs/littlefs_v2_1.bin');
+const MICROPY_FIXTURE_PATH = path.resolve(
+  process.cwd(),
+  'src/tests/fixtures/fs-images/littlefs/littlefs-micropython1-25.bin',
+);
 const DEFAULT_WASM_PATH = path.resolve(process.cwd(), 'wasm/littlefs/littlefs.wasm');
 const FALLBACK_WASM_PATH = path.resolve(process.cwd(), 'src/wasm/littlefs/littlefs.wasm');
 
 const fixtureImage = new Uint8Array(readFileSync(FIXTURE_PATH));
+const micropythonImage = new Uint8Array(readFileSync(MICROPY_FIXTURE_PATH));
 const wasmURL = pathToFileURL(existsSync(DEFAULT_WASM_PATH) ? DEFAULT_WASM_PATH : FALLBACK_WASM_PATH).href;
 
 const textDecoder = new TextDecoder();
@@ -18,6 +23,7 @@ const textEncoder = new TextEncoder();
 const KNOWN_FILE = '/info.txt';
 const RENAMED_FILE = '/info-renamed.txt';
 const NESTED_FILE_NAME = 'nested_info.txt';
+const MICROPY_BOOT_FILE = '/boot.py';
 
 const LITTLEFS_JS_PATH = path.resolve(process.cwd(), 'src/wasm/littlefs/littlefs.js');
 const LITTLEFS_UMD_ORIGINAL =
@@ -63,6 +69,11 @@ async function loadLittleFSModule(): Promise<LittleFSModule> {
 const createFixtureLittleFS = async () => {
   const { createLittleFSFromImage } = await loadLittleFSModule();
   return createLittleFSFromImage(new Uint8Array(fixtureImage), { wasmURL });
+};
+
+const createMicropythonLittleFS = async () => {
+  const { createLittleFSFromImage } = await loadLittleFSModule();
+  return createLittleFSFromImage(new Uint8Array(micropythonImage), { wasmURL });
 };
 
 type LittleFSEntry = { path: string; type: 'file' | 'dir'; size?: number; name?: string };
@@ -222,5 +233,14 @@ describe('littlefs fixture image', () => {
     if (caught instanceof LittleFSError) {
       expect(typeof caught.code).toBe('number');
     }
+  });
+
+  it('finds MicroPython boot.py in the LittleFS fixture', async () => {
+    const lfs = await createMicropythonLittleFS();
+    const entries = listAllEntries(lfs);
+
+    const bootEntry = entries.find((entry) => entry.path === MICROPY_BOOT_FILE);
+    expect(bootEntry).toBeDefined();
+    expect(bootEntry?.type).toBe('file');
   });
 });

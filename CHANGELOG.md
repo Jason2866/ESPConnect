@@ -12,6 +12,7 @@
 - Removed the decorateLoader shim since it's no longer needed with tasmota-webserial-esptool
 - Added Playwright E2E scaffolding with a mocked WebSerial/esptool client
 - Added Vitest for tasmota-webserial-esptool
+- Added filesystem probe tests, including MicroPython LittleFS fixture coverage
 - Bump tasmota-webserial-esptool 7.2.3 to 7.3.3
 - Bump vue-i18n 11.2.7 to 11.2.8
 - Bump vuetify 3.1.15 to 3.1.16
