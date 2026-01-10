@@ -351,6 +351,7 @@
     empty: {
       title: 'No partition data yet',
       subtitle: 'Connect to an ESP32 to load its partition table (ESP8266 not supported).',
+      subtitleConnected: 'No partition table detected on this ESP32.',
     },
     alerts: {
       unusedFlash: {

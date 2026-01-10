@@ -351,6 +351,7 @@
     empty: {
       title: 'Aucune info de partionnnement',
       subtitle: 'Connctez un ESP32 afin d`en lire la table de partition (fonction non disponible pour la famille ESP8266).',
+      subtitleConnected: 'Aucune table de partitions détectée sur cet ESP32.',
     },
     alerts: {
       unusedFlash: {

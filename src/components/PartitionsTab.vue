@@ -1,6 +1,9 @@
 <template>
   <div v-if="!partitionSegments.length" class="partitions-empty">
-    <v-card class="partitions-empty__card partitions-empty__card--disconnected" variant="tonal">
+    <v-card :class="[
+      'partitions-empty__card',
+      { 'partitions-empty__card--disconnected': !connected },
+    ]" variant="tonal">
       <v-card-text class="partitions-empty__body">
         <v-avatar class="partitions-empty__avatar" size="70">
           <v-icon size="34">mdi-table-refresh</v-icon>
@@ -8,7 +11,7 @@
         <div class="partitions-empty__text">
           <div class="partitions-empty__title">{{ t('partitions.empty.title') }}</div>
           <div class="partitions-empty__subtitle">
-            {{ t('partitions.empty.subtitle') }}
+            {{ emptySubtitle }}
           </div>
         </div>
       </v-card-text>
@@ -144,16 +147,18 @@ const props = withDefaults(
     formattedPartitions?: FormattedPartitionRow[];
     unusedSummary?: UnusedFlashSummary | null;
     flashSizeLabel?: string | null;
+    connected?: boolean;
   }>(),
   {
     partitionSegments: () => [],
     formattedPartitions: () => [],
     unusedSummary: null,
     flashSizeLabel: '',
+    connected: false,
   },
 );
 
-const { partitionSegments, formattedPartitions, unusedSummary, flashSizeLabel } = toRefs(props);
+const { partitionSegments, formattedPartitions, unusedSummary, flashSizeLabel, connected } = toRefs(props);
 const { t } = useI18n();
 
 const PARTITION_BUILDER_URL =
@@ -201,6 +206,9 @@ const partitionBuilderUrl = computed(() => {
   const encoded = encodeCsvAsBase64(csv);
   return `${PARTITION_BUILDER_URL}?flash=${flashSizeMB.value}&partitions=base64:${encoded}`;
 });
+const emptySubtitle = computed(() =>
+  connected.value ? t('partitions.empty.subtitleConnected') : t('partitions.empty.subtitle'),
+);
 
 onMounted(() => {
   logPartitionCsv(partitionCsvRows.value);

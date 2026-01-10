@@ -104,7 +104,8 @@
 
             <v-window-item value="partitions">
               <PartitionsTab :partition-segments="partitionSegments" :formatted-partitions="formattedPartitions"
-                :unused-summary="unusedFlashSummary" :flash-size-label="partitionFlashSizeLabel" />
+                :unused-summary="unusedFlashSummary" :flash-size-label="partitionFlashSizeLabel"
+                :connected="connected" />
             </v-window-item>
 
             <v-window-item value="nvs">

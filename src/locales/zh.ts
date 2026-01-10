@@ -349,6 +349,7 @@
     empty: {
       title: '暂无分区数据',
       subtitle: '连接 ESP32 以加载其分区表（ESP8266 不受支持）。',
+      subtitleConnected: '未检测到此 ESP32 的分区表。',
     },
     alerts: {
       unusedFlash: {
