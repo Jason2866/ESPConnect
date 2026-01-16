@@ -1,19 +1,41 @@
 # Changelog
 
-## 1.1.5-preview
+## 1.1.6-preview
+### Improvement
+- Serial Monitor now lets you send text input, including Ctrl+C, suggest by ator1811 ([issue #90](https://github.com/thelastoutpostworkshop/ESPConnect/issues/90)).
+- Flash tools can erase a selected partition or a custom flash region without wiping the entire chip ([issue #109](https://github.com/thelastoutpostworkshop/ESPConnect/issues/109)).
 
+### Fixed
+- Flash tools now refresh the partition table after full erase or firmware flashes so the partitions view stays accurate ([issue #104](https://github.com/thelastoutpostworkshop/ESPConnect/issues/104)).
+- Partitions empty state now distinguishes between disconnected devices and connected ESP32s with no partition table ([issue #104](https://github.com/thelastoutpostworkshop/ESPConnect/issues/104)).
+- OTA Apps tab now reads both OTADATA sectors so the active slot indicator updates correctly after OTA swaps ([issue #108](https://github.com/thelastoutpostworkshop/ESPConnect/issues/108)).
+
+### Internal runtime
+- Bump tasmota-webserial-esptool 7.3.3 to 7.3.4
+- Bump @types/node from 25.0.5 to 25.0.6 
+
+### Development tooling
+- Bump vite from 7.3.0 to 7.3.1
+
+## 1.1.5
 ### Improvement
 - Serial Monitor now renders ANSI color/style escape sequences in the output.
 - Serial Monitor adds a copy-to-clipboard action.
+- Show a progress dialog while erasing the entire flash.
+- Filesystem tools now probe partition contents to detect LittleFS/FAT/SPIFFS before mounting ([issue #102](https://github.com/thelastoutpostworkshop/ESPConnect/issues/102)).
+- Filesystem tools now treat `.py` files as text for previews.
 
 ### Internal
 - Removed the decorateLoader shim since it's no longer needed with tasmota-webserial-esptool
 - Added Playwright E2E scaffolding with a mocked WebSerial/esptool client
 - Added Vitest for tasmota-webserial-esptool
-- Bump tasmota-webserial-esptool 7.2.3 to 7.2.6
+- Added filesystem probe tests, including MicroPython LittleFS fixture coverage
+- Bump tasmota-webserial-esptool 7.2.3 to 7.3.3
 - Bump vue-i18n 11.2.7 to 11.2.8
 - Bump vuetify 3.1.15 to 3.1.16
 - Bump @types/node from 22.19.3 to 25.0.3
+- Bump sass from 1.97.1 to 1.97.2
+- Bump vue-tsc from 3.2.1 to 3.2.2
 
 ## 1.1.4
 ### Improvement

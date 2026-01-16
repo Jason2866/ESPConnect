@@ -33,6 +33,11 @@
             <v-icon start>mdi-download-multiple</v-icon>
             {{ t('flashFirmware.backup.downloadSelectedPartition') }}
           </v-btn>
+          <v-btn color="error" variant="tonal" :disabled="busy || maintenanceBusy || selectedPartition === null"
+            @click="emit('erase-flash', { mode: 'partition', partition: selectedPartition })">
+            <v-icon start>mdi-delete-empty</v-icon>
+            {{ t('flashFirmware.backup.eraseSelectedPartition') }}
+          </v-btn>
           <v-btn color="primary" variant="text" :disabled="busy || maintenanceBusy"
             @click="emit('download-all-partitions')">
             <v-icon start>mdi-select-group</v-icon>
@@ -61,6 +66,11 @@
         <v-btn color="primary" variant="tonal" :disabled="busy || maintenanceBusy" @click="emit('download-flash')">
           <v-icon start>mdi-download-box</v-icon>
           {{ t('flashFirmware.backup.downloadRegion') }}
+        </v-btn>
+        <v-btn color="error" variant="tonal" :disabled="busy || maintenanceBusy"
+          @click="emit('erase-flash', { mode: 'region', offset: flashReadOffset, length: flashReadLength })">
+          <v-icon start>mdi-select-remove</v-icon>
+          {{ t('flashFirmware.backup.eraseRegion') }}
         </v-btn>
         <v-btn color="error" variant="outlined" :disabled="busy || maintenanceBusy"
           @click="emit('erase-flash', { mode: 'full' })">
@@ -264,7 +274,8 @@
         <div class="progress-dialog__label">
           {{ flashProgressDialog.label || t('flashFirmware.progress.preparingFlash') }}
         </div>
-        <v-progress-linear :model-value="flashProgressDialog.value" height="24" color="primary" rounded striped />
+        <v-progress-linear :model-value="flashProgressDialog.value" height="24" color="primary" rounded striped
+          :indeterminate="flashProgressDialog.indeterminate === true" />
       </v-card-text>
       <v-card-actions class="progress-dialog__actions">
         <v-spacer />
@@ -369,7 +380,7 @@ const props = withDefaults(
     partitionOptions: () => [],
     selectedPartition: null,
     integrityPartition: null,
-    flashProgressDialog: () => ({ visible: false, value: 0, label: '' }),
+    flashProgressDialog: () => ({ visible: false, value: 0, label: '', indeterminate: false }),
     downloadProgress: () => ({ visible: false, value: 0, label: '' }),
   },
 );
